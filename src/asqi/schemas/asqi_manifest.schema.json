@@ -1,5 +1,86 @@
 {
   "$defs": {
+    "DatasetFeature": {
+      "description": "Defines a feature/column within a dataset.\n\nThe dtype field uses HuggingFace datasets dtype values.\nCommon types: 'string', 'int64', 'float32', 'bool'.",
+      "properties": {
+        "name": {
+          "description": "The name of the feature.",
+          "title": "Name",
+          "type": "string"
+        },
+        "dtype": {
+          "description": "The data type of the feature. Common types: 'string', 'int64', 'int32', 'float64', 'float32', 'bool'. See: https://huggingface.co/docs/datasets/about_dataset_features",
+          "enum": [
+            "null",
+            "bool",
+            "int8",
+            "int16",
+            "int32",
+            "int64",
+            "uint8",
+            "uint16",
+            "uint32",
+            "uint64",
+            "float16",
+            "float32",
+            "float",
+            "float64",
+            "double",
+            "time32[s]",
+            "time32[ms]",
+            "time64[us]",
+            "time64[ns]",
+            "timestamp[s]",
+            "timestamp[ms]",
+            "timestamp[us]",
+            "timestamp[ns]",
+            "date32",
+            "date64",
+            "duration[s]",
+            "duration[ms]",
+            "duration[us]",
+            "duration[ns]",
+            "binary",
+            "large_binary",
+            "binary_view",
+            "string",
+            "large_string",
+            "string_view"
+          ],
+          "title": "Dtype",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Description of the feature - data type, purpose etc.",
+          "title": "Description"
+        }
+      },
+      "required": [
+        "name",
+        "dtype"
+      ],
+      "title": "DatasetFeature",
+      "type": "object"
+    },
+    "DatasetType": {
+      "description": "Supported dataset types for InputDataset.",
+      "enum": [
+        "huggingface",
+        "pdf",
+        "txt"
+      ],
+      "title": "DatasetType",
+      "type": "string"
+    },
     "EnvironmentVariable": {
       "description": "Defines an environment variable required by the test container.",
       "properties": {
@@ -32,6 +113,72 @@
         "name"
       ],
       "title": "EnvironmentVariable",
+      "type": "object"
+    },
+    "InputDataset": {
+      "description": "Defines a dataset input that the container requires.\n\nSupported dataset types:\n- 'huggingface': HuggingFace datasets (requires features to be defined)\n- 'pdf': PDF documents\n- 'txt': Plain text files\n\nSupports \"either/or\" relationships by accepting multiple types:\n- type: \"pdf\" - Single type\n- type: [\"pdf\", \"txt\"] - Either PDF or TXT\n- type: [\"huggingface\", \"pdf\", \"txt\"] - Any of these formats",
+      "properties": {
+        "name": {
+          "description": "The dataset name, e.g., 'evaluation_data', 'test_prompts'.",
+          "title": "Name",
+          "type": "string"
+        },
+        "required": {
+          "default": true,
+          "description": "Whether this dataset is mandatory for execution.",
+          "title": "Required",
+          "type": "boolean"
+        },
+        "type": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DatasetType"
+            },
+            {
+              "items": {
+                "$ref": "#/$defs/DatasetType"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "The dataset type(s): single type or list of accepted types. Examples: 'huggingface', ['pdf', 'txt'], or ['huggingface', 'pdf', 'txt'].",
+          "title": "Type"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Description of the dataset's role in the test.",
+          "title": "Description"
+        },
+        "features": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/DatasetFeature"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "List of required features within a HuggingFace dataset.",
+          "title": "Features"
+        }
+      },
+      "required": [
+        "name",
+        "type"
+      ],
+      "title": "InputDataset",
       "type": "object"
     },
     "InputParameter": {
@@ -109,6 +256,55 @@
       "title": "OutputArtifact",
       "type": "object"
     },
+    "OutputDataset": {
+      "description": "Defines a dataset output that will be generated by the test container.",
+      "properties": {
+        "name": {
+          "description": "The name of this output dataset (e.g., 'augmented_rag_data')",
+          "title": "Name",
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/DatasetType",
+          "description": "Type of dataset: huggingface, pdf, or txt"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Description of the output dataset's purpose and contents",
+          "title": "Description"
+        },
+        "features": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/DatasetFeature"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "List of required features within a HuggingFace dataset",
+          "title": "Features"
+        }
+      },
+      "required": [
+        "name",
+        "type"
+      ],
+      "title": "OutputDataset",
+      "type": "object"
+    },
     "OutputMetric": {
       "description": "Defines a metric that will be present in the test container's output.",
       "properties": {
@@ -148,6 +344,44 @@
       "title": "OutputMetric",
       "type": "object"
     },
+    "OutputReports": {
+      "description": "Defines a report that will be generated by the test container.",
+      "properties": {
+        "name": {
+          "description": "The name of the report ('detailed_report', 'summary_report', ...).",
+          "title": "Name",
+          "type": "string"
+        },
+        "type": {
+          "description": "The report file format ('pdf' or 'html').",
+          "enum": [
+            "pdf",
+            "html"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Short description of the report content.",
+          "title": "Description"
+        }
+      },
+      "required": [
+        "name",
+        "type"
+      ],
+      "title": "OutputReports",
+      "type": "object"
+    },
     "SystemInput": {
       "description": "Defines a system input that the container requires.",
       "properties": {
@@ -157,9 +391,19 @@
           "type": "string"
         },
         "type": {
-          "description": "The system type, e.g., 'llm_api','rest_api' or 'rag_api'.",
-          "title": "Type",
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "The system type(s) accepted. Can be a single string (e.g., 'llm_api') or a list of strings (e.g., ['llm_api', 'vlm_api']) for containers that support multiple system types. Valid types: 'llm_api', 'rest_api', 'rag_api', 'image_generation_api', 'image_editing_api', 'vlm_api'.",
+          "title": "Type"
         },
         "required": {
           "default": true,
@@ -219,7 +463,8 @@
       "type": "boolean"
     },
     "input_systems": {
-      "description": "Systems required as input. Should minimally include a system_under_test",
+      "default": [],
+      "description": "Systems required as input. Can be empty for containers that don't require systems (e.g., pure data transformation).",
       "items": {
         "$ref": "#/$defs/SystemInput"
       },
@@ -233,6 +478,15 @@
         "$ref": "#/$defs/InputParameter"
       },
       "title": "Input Schema",
+      "type": "array"
+    },
+    "input_datasets": {
+      "default": [],
+      "description": "Defines the schema for user-provided input datasets.",
+      "items": {
+        "$ref": "#/$defs/InputDataset"
+      },
+      "title": "Input Datasets",
       "type": "array"
     },
     "output_metrics": {
@@ -277,12 +531,27 @@
       },
       "title": "Environment Variables",
       "type": "array"
+    },
+    "output_reports": {
+      "description": "Defines the reports generated by the test container.",
+      "items": {
+        "$ref": "#/$defs/OutputReports"
+      },
+      "title": "Output Reports",
+      "type": "array"
+    },
+    "output_datasets": {
+      "description": "Defines the datasets generated by the container.",
+      "items": {
+        "$ref": "#/$defs/OutputDataset"
+      },
+      "title": "Output Datasets",
+      "type": "array"
     }
   },
   "required": [
     "name",
-    "version",
-    "input_systems"
+    "version"
   ],
   "title": "ASQI Manifest",
   "type": "object",

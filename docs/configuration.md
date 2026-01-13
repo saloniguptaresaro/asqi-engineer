@@ -173,6 +173,179 @@ RAG API systems must return responses in OpenAI-compatible chat completions form
   ]
 }
 ```
+
+### Image Generation API Systems
+
+`image_generation_api` systems support text-to-image generation using OpenAI-compatible APIs.
+
+#### System Configuration
+
+Configure image generation systems in your `litellm_config.yaml`:
+
+```yaml
+model_list:
+  # ... existing models ...
+
+  # Image Generation Systems (from OpenAI)
+  - model_name: "openai/*"
+    litellm_params:
+      model: "openai/*"
+      api_key: os.environ/OPENAI_API_KEY
+```
+
+Then reference it in your ASQI systems configuration:
+
+```yaml
+systems:
+  # LiteLLM proxy configuration
+  dalle3_generator:
+    type: "image_generation_api"
+    description: "OpenAI DALL-E 3 Image Generator"
+    params:
+      base_url: "http://localhost:4000/v1"
+      model: "openai/dall-e-3"
+      api_key: "sk-1234"
+```
+
+#### Expected Request Format
+
+ASQI sends OpenAI-compatible image generation requests:
+
+```json
+{
+  "model": "openai/dall-e-3",
+  "prompt": "A cute baby sea otter, in an animated style",
+  "n": 1,
+  "size": "1024x1024",
+  "response_format": "url"
+}
+```
+
+#### Expected Response Schema
+
+Image generation systems return OpenAI-compatible image generation responses:
+
+```json
+{
+  "created": 1703658209,
+  "data": [
+    {
+      "url": "https://example.com/generated_image.png",
+      "revised_prompt": "A cute baby sea otter..."
+    }
+  ]
+}
+```
+
+### Image Editing API Systems
+
+`image_editing_api` systems support image-to-image editing using OpenAI-compatible APIs.
+
+#### System Configuration
+
+Configure image editing systems in your `litellm_config.yaml`:
+
+```yaml
+model_list:
+  # ... existing models ...
+
+  # Image Editing Systems
+  - model_name: "openai/*"
+    litellm_params:
+      model: "openai/*"
+      api_key: os.environ/OPENAI_API_KEY
+```
+
+Then reference it in your ASQI systems configuration:
+
+```yaml
+systems:
+  # LiteLLM proxy configuration
+  dalle3_editor:
+    type: "image_editing_api"
+    description: "OpenAI DALL-E 3 Image Editor"
+    params:
+      base_url: "http://localhost:4000/v1"
+      model: "openai/dall-e-3"
+      api_key: "sk-1234"
+```
+
+#### Expected Request Format
+
+ASQI sends OpenAI-compatible image editing requests (multipart/form-data):
+
+```
+POST /v1/images/edits
+Content-Type: multipart/form-data
+
+image: <uploaded_image.png>
+prompt: "Change the background to a beach scene"
+model: "dall-e-3"
+n: 1
+size: "1024x1024"
+```
+
+#### Expected Response Schema
+
+Image editing systems return the same format as image generation APIs.
+
+### VLM API Systems
+
+`vlm_api` systems support vision language models that can process both text and images.
+
+#### System Configuration
+
+Configure VLM systems in your `litellm_config.yaml`:
+
+```yaml
+model_list:
+  # ... existing models ...
+
+  # Vision Language Models
+  - model_name: "openai/*"
+    litellm_params:
+      model: "openai/*"
+      api_key: os.environ/OPENAI_API_KEY
+```
+
+Then reference it in your ASQI systems configuration:
+
+```yaml
+systems:
+  # LiteLLM proxy configuration
+  gpt4_1_mini_vlm:
+    type: "vlm_api"
+    description: "OpenAI GPT-4.1-Mini VLM Evaluator"
+    params:
+      base_url: "http://localhost:4000/v1"
+      model: "openai/gpt-4.1-mini"
+      api_key: "sk-1234"
+```
+
+#### Expected Request Format
+
+ASQI sends multimodal chat completion requests:
+
+```json
+{
+  "model": "openai/gpt-4.1-mini",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {"type": "text", "text": "Evaluate this image."},
+        {"type": "image_url", "image_url": {"url": "https://example.com/image.png"}}
+      ]
+    }
+  ],
+  "max_tokens": 150
+}
+```
+
+#### Expected Response Schema
+
+VLMs return standard chat completion format with text responses.
+
 ### Environment Variable Handling
 
 ASQI supports a three-level configuration hierarchy:
@@ -364,6 +537,189 @@ test_suite:
       max_iterations: 20
 ```
 
+### Test Suite with Input Datasets
+
+Tests can reference datasets from a dataset registry:
+
+```yaml
+suite_name: "Dataset-based Evaluation"
+test_suite:
+  - id: "benchmark_eval"
+    name: "benchmark evaluation"
+    description: "Evaluate using standard benchmark dataset"
+    image: "my-registry/evaluator:latest"
+    systems_under_test: ["my_chatbot"]
+    input_datasets:
+      evaluation_data: "benchmark_questions"  # References dataset from registry
+      source_docs: "company_handbook"
+    volumes:
+      input: "data/inputs/"
+      output: "data/outputs/"
+    params:
+      batch_size: 10
+```
+
+See [Dataset Support](datasets.md) for detailed documentation on using datasets in test suites.
+
+## Dataset Registry Configuration
+
+The dataset registry allows you to define reusable datasets that can be referenced across multiple test suites and generation jobs.
+
+### Basic Structure
+
+```yaml
+# yaml-language-server: $schema=../src/asqi/schemas/asqi_datasets_config.schema.json
+
+datasets:
+  dataset_name:
+    type: "huggingface" | "pdf" | "txt"
+    description: "Optional description"
+    # Type-specific fields...
+```
+
+### HuggingFace Datasets
+
+```yaml
+datasets:
+  eval_questions:
+    type: "huggingface"
+    description: "Evaluation questions for chatbot testing"
+    loader_params:
+      builder_name: "json"           # Format: json, csv, parquet, arrow, text, etc.
+      data_files: "questions.json"   # File path relative to input mount
+      # OR for directories:
+      # data_dir: "dataset_folder/"
+    mapping:
+      # Map actual dataset columns to expected feature names
+      question: "prompt"
+      answer: "response"
+    tags: ["evaluation", "en"]
+```
+
+**Loader Parameters:**
+- `builder_name`: Dataset format (`json`, `csv`, `parquet`, `arrow`, `text`, `xml`, `imagefolder`, `audiofolder`, `videofolder`)
+- `data_files`: Single file or list of files (relative to input mount)
+- `data_dir`: Directory containing dataset files (alternative to `data_files`)
+- `revision`: Git revision for HuggingFace Hub datasets (optional, for Hub datasets only)
+
+**Column Mapping:**
+The `mapping` field translates dataset column names to container-expected feature names:
+- Keys: Actual column names in the dataset
+- Values: Expected feature names from container manifest
+
+### PDF Datasets
+
+```yaml
+datasets:
+  company_handbook:
+    type: "pdf"
+    description: "Company policy handbook for RAG testing"
+    file_path: "handbook.pdf"  # Path relative to input mount
+    tags: ["rag", "documents"]
+```
+
+### Text File Datasets
+
+```yaml
+datasets:
+  product_catalog:
+    type: "txt"
+    description: "Product descriptions corpus"
+    file_path: "products.txt"  # Path relative to input mount
+    tags: ["generation", "source"]
+```
+
+### Complete Example
+
+```yaml
+datasets:
+  # HuggingFace dataset with mapping
+  benchmark_v1:
+    type: "huggingface"
+    description: "Standard QA benchmark dataset"
+    loader_params:
+      builder_name: "json"
+      data_files: "benchmark_qa.json"
+    mapping:
+      input_text: "prompt"
+      expected_output: "response"
+    tags: ["evaluation", "benchmark", "v1"]
+  
+  # PDF document
+  rag_source_docs:
+    type: "pdf"
+    description: "Source documents for RAG data generation"
+    file_path: "knowledge_base.pdf"
+    tags: ["rag", "source"]
+  
+  # Text file
+  training_corpus:
+    type: "txt"
+    description: "Training text corpus"
+    file_path: "corpus.txt"
+    tags: ["training", "text"]
+```
+
+## Data Generation Configuration
+
+Data generation configuration defines synthetic data generation jobs using data generation containers.
+
+### Basic Structure
+
+```yaml
+# yaml-language-server: $schema=../../src/asqi/schemas/asqi_generation_config.schema.json
+
+job_name: "Generation Job Name"
+generation_jobs:
+  - id: "job_id"
+    name: "Human-readable job name"
+    image: "container-image:tag"
+    systems:
+      generation_system: "system_name"
+    input_datasets:
+      dataset_alias: "dataset_reference"
+    volumes:
+      input: "input/path/"
+      output: "output/path/"
+    params:
+      # Container-specific parameters
+```
+
+### Field Descriptions
+
+**Required Fields:**
+- `job_name`: Name of the overall generation job
+- `generation_jobs`: List of individual generation job configurations
+  - `id`: Unique identifier for the job (a-z, 0-9, _, max 32 chars)
+  - `name`: Human-readable job name
+  - `image`: Docker image for the data generation container
+
+**Optional Fields:**
+- `systems`: Systems used for generation (not systems under test)
+- `input_datasets`: Input datasets for data generation
+  - Can reference datasets from registry (string value)
+  - Can define inline datasets (object with file_path, etc.)
+- `output_datasets`: Expected output datasets (usually declared in container manifest)
+- `params`: Parameters passed to the container
+- `volumes`: Input/output directory mounts
+- `env_file`: Path to environment file
+- `environment`: Environment variables for the container
+
+### Dataset References
+
+Reference datasets from the registry or define them inline:
+
+```yaml
+# Reference from registry
+input_datasets:
+  evaluation_data: "benchmark_questions"
+
+# Inline definition
+input_datasets:
+  source_documents_pdf:
+    file_path: "sample.pdf"
+```
+
 ## Score Card Configuration
 
 Score cards define automated assessment criteria for test results. They evaluate individual test executions (not aggregated results).
@@ -418,6 +774,33 @@ indicators:
       - { outcome: "HIGH_RISK", condition: "greater_than", threshold: 2 }
 ```
 
+
+### Displaying Technical Reports in Score Cards
+
+To display technical reports in a score card, use the `display_reports` field in your indicator configuration. Each entry in `display_reports` must match the `name` of a report declared in the test container's manifest under `output_reports`.
+
+#### Selecting Reports for Display
+
+- In your indicator, you can reference one or more of the test reports by name using `display_reports`
+
+```yaml
+indicators:
+  - id: "garak_security_check"
+    name: "Garak Security Check"
+    apply_to:
+      test_id: "garak_prompt_injection"
+    display_reports: ["quick_summary", "detailed_metrics"]
+    metric: "attack_success_rate"
+    assessment:
+      - { outcome: "SECURE", condition: "equal_to", threshold: 0.0 }
+      - { outcome: "VULNERABLE", condition: "greater_than", threshold: 0.0 }
+```
+
+#### Report Validations
+
+- Every report listed in `display_reports` exists in the container manifest (`output_reports`).
+- There are no duplicate report names in `display_reports`.
+
 ### Available Conditions
 
 - `equal_to`: Exact value matching (supports boolean and numeric)
@@ -439,6 +822,72 @@ indicators:
       - { outcome: "SECURE", condition: "equal_to", threshold: 0.0 }
       - { outcome: "VULNERABLE", condition: "greater_than", threshold: 0.0 }
 ```
+
+### Enforcing Certain System Type
+
+Score card indicators can additional specify that the test results should be from certain system types using the `target_system_type` field. This is useful when a indicator only applies to one or multiple system types and should not be used for other types.
+
+**Single System Type:**
+```yaml
+indicators:
+  - id: "llm_accuracy_check"
+    name: "LLM Accuracy Check"
+    apply_to:
+      test_id: "multi_modal_test"
+      target_system_type: "llm_api"  # Only applies to LLM systems
+    metric: "accuracy"
+    assessment:
+      - { outcome: "PASS", condition: "greater_equal", threshold: 0.85 }
+      - { outcome: "FAIL", condition: "less_than", threshold: 0.85 }
+
+  - id: "vlm_accuracy_check"
+    name: "VLM Accuracy Check"
+    apply_to:
+      test_id: "multi_modal_test"
+      target_system_type: "vlm_api"  # Only applies to VLM systems
+    metric: "accuracy"
+    assessment:
+      - { outcome: "PASS", condition: "greater_equal", threshold: 0.75 }  # Different threshold
+      - { outcome: "FAIL", condition: "less_than", threshold: 0.75 }
+```
+
+**Multiple System Types:**
+```yaml
+indicators:
+  - id: "general_accuracy_check"
+    name: "General Accuracy Check"
+    apply_to:
+      test_id: "multi_modal_test"
+      target_system_type: ["llm_api", "vlm_api"]  # Applies to both types
+    metric: "accuracy"
+    assessment:
+      - { outcome: "PASS", condition: "greater_equal", threshold: 0.70 }
+      - { outcome: "FAIL", condition: "less_than", threshold: 0.70 }
+```
+
+**No System Type Filter (Default):**
+
+If `target_system_type` is omitted, the indicator applies to all system types for the specified test:
+
+```yaml
+indicators:
+  - id: "success_check"
+    name: "Success Check"
+    apply_to:
+      test_id: "compatibility_test"
+      # No target_system_type - applies to all system types
+    metric: "success"
+    assessment:
+      - { outcome: "PASS", condition: "equal_to", threshold: true }
+```
+
+**System Types:**
+- `llm_api` - Language models
+- `vlm_api` - Vision-language models
+- `rag_api` - RAG systems
+- `rest_api` - REST API endpoints
+- `image_generation_api` - Image generation models
+- `image_editing_api` - Image editing models
 
 ### Metric Expressions
 
@@ -466,10 +915,16 @@ metric:
 
 #### Supported Operations
 
-**Operators:** `+`, `-`, `*`, `/`, `()`
+**Arithmetic Operators:** `+`, `-`, `*`, `/`, `()`
+
+**Comparison Operators:** `>`, `>=`, `<`, `<=`, `==`, `!=`
+
+**Boolean Operators:** `and`, `or`, `not`
+
+**Conditional:** `if-else` expressions for conditional logic
 
 **Functions:**
-- `min(...)`, `max(...)`, `avg(...)`, `sum(...)` - Aggregation
+- `min(...)`, `max(...)`, `avg(...)` - Aggregation
 - `abs(x)` - Absolute value
 - `round(x, n)` - Round to n decimals
 - `pow(x, y)` - Power (x^y)
@@ -500,6 +955,41 @@ expression: "min((0.4 * speed + 0.6 * quality), 1.0)"
 values: { speed: "perf.speed_score", quality: "perf.quality_score" }
 ```
 
+Hard gates with AND conditions (returns score if all gates pass, else penalty):
+```yaml
+expression: "(0.45 * accuracy + 0.35 * relevance + 0.20 * helpfulness) if (faith >= 0.7 and retrieval >= 0.6) else -1"
+values: 
+  accuracy: "metrics.accuracy"
+  relevance: "metrics.relevance"
+  helpfulness: "metrics.helpfulness"
+  faith: "metrics.faithfulness"
+  retrieval: "metrics.retrieval"
+```
+
+Gate compliance counting (counts how many gates pass):
+```yaml
+expression: "(accuracy >= 0.8) + (relevance >= 0.75) + (helpfulness >= 0.7)"
+values:
+  accuracy: "metrics.accuracy"
+  relevance: "metrics.relevance"
+  helpfulness: "metrics.helpfulness"
+```
+
+Flexible OR gating (meets A or B requirement):
+```yaml
+expression: "1 if (performance >= 80 or cost <= 0.01) else 0"
+values:
+  performance: "metrics.performance_score"
+  cost: "metrics.cost_per_request"
+```
+
+Nested conditional tiers (tiered scoring):
+```yaml
+expression: "0.95 if (risk < 0.1) else (0.75 if (risk < 0.3) else (0.5 if (risk < 0.5) else 0.2))"
+values:
+  risk: "metrics.risk_score"
+```
+
 ### Audit Indicators
 
 Audit indicators represent **human-reviewed assessment items** that do **not** reference test metrics.
@@ -526,9 +1016,20 @@ Audit responses need to be provided separately:
 ```yaml
 responses:
   - indicator_id: configuration_complexity
+    sut_name: "openai_gpt4o_mini"  # Optional; when provided, response is per system
     selected_outcome: "B"
     notes: "Some domain knowledge needed during setup"
+  - indicator_id: configuration_complexity
+    sut_name: "nova_lite"
+    selected_outcome: "C"
+    notes: "Requires prompt engineering and additional infra"
 ```
+
+When any response includes `sut_name`, provide entries for **every** system under test.
+If an entry references a system that was not part of the evaluation, the score card will
+return an error.
+Do **not** mix global (no `sut_name`) and per-system (`sut_name` present) responses for the
+same indicator—this combination is rejected with an explicit error.
 
 #### Complete Example
 
@@ -570,6 +1071,69 @@ indicators:
     assessment:
       - { outcome: "Pass", condition: "greater_equal", threshold: 0.7 }
       - { outcome: "Fail", condition: "less_than", threshold: 0.7 }
+
+  # Hard gates with AND conditions
+  - id: "accuracy_with_quality_gates"
+    name: "Accuracy Score with Quality Gates"
+    apply_to: { test_id: "chatbot_test" }
+    metric:
+      expression: "(0.45 * accuracy + 0.35 * relevance + 0.20 * helpfulness) if (faith >= 0.7 and retrieval >= 0.6 and instruction >= 0.7) else -1"
+      values:
+        accuracy: "metrics.answer_accuracy"
+        relevance: "metrics.answer_relevance"
+        helpfulness: "metrics.helpfulness"
+        faith: "metrics.faithfulness"
+        retrieval: "metrics.retrieval"
+        instruction: "metrics.instruction_following"
+    assessment:
+      - { outcome: "A", condition: "greater_equal", threshold: 0.8 }
+      - { outcome: "B", condition: "greater_equal", threshold: 0.7 }
+      - { outcome: "C", condition: "greater_equal", threshold: 0.6 }
+      - { outcome: "F", condition: "less_than", threshold: 0.6 }
+
+  # Gate compliance counting with comparisons
+  - id: "gate_compliance"
+    name: "Quality Gates Passed"
+    apply_to: { test_id: "chatbot_test" }
+    metric:
+      expression: "(accuracy >= 0.8) + (relevance >= 0.75) + (helpfulness >= 0.7) + (faithfulness >= 0.7)"
+      values:
+        accuracy: "metrics.answer_accuracy"
+        relevance: "metrics.answer_relevance"
+        helpfulness: "metrics.helpfulness"
+        faithfulness: "metrics.faithfulness"
+    assessment:
+      - { outcome: "A", condition: "greater_equal", threshold: 4 }
+      - { outcome: "B", condition: "greater_equal", threshold: 3 }
+      - { outcome: "C", condition: "greater_equal", threshold: 2 }
+      - { outcome: "F", condition: "less_than", threshold: 2 }
+
+  # Flexible OR gating
+  - id: "performance_or_cost"
+    name: "Performance OR Cost Target Met"
+    apply_to: { test_id: "benchmark_test" }
+    metric:
+      expression: "1 if (throughput >= 50 or cost_per_token <= 0.001) else 0"
+      values:
+        throughput: "metrics.tokens_per_second"
+        cost_per_token: "metrics.cost_per_token"
+    assessment:
+      - { outcome: "Pass", condition: "equal_to", threshold: 1 }
+      - { outcome: "Fail", condition: "equal_to", threshold: 0 }
+
+  # Nested conditional tiers
+  - id: "risk_tiered_score"
+    name: "Safety Score Based on Risk Tier"
+    apply_to: { test_id: "security_test" }
+    metric:
+      expression: "0.95 if (risk < 0.1) else (0.75 if (risk < 0.3) else (0.5 if (risk < 0.5) else 0.2))"
+      values:
+        risk: "metrics.risk_score"
+    assessment:
+      - { outcome: "A", condition: "greater_equal", threshold: 0.9 }
+      - { outcome: "B", condition: "greater_equal", threshold: 0.7 }
+      - { outcome: "C", condition: "greater_equal", threshold: 0.5 }
+      - { outcome: "F", condition: "less_than", threshold: 0.5 }
 
   # Audit indicator
   - id: "configuration_complexity"
@@ -621,6 +1185,45 @@ def main():
     print(json.dumps(results))
 ```
 
+#### Entry Point Return Format
+
+Your test container should print a JSON to stdout. There are two simple options:
+
+- **Just metrics:**
+  ```json
+  {
+    "success": true,
+    "score": 0.95,
+    "test_count": 10
+  }
+  ```
+  (All fields match your `output_metrics` in the manifest)
+
+- **Metrics and Reports:**
+  ```json
+  {
+    "test_results": {
+      "success": true,
+      "score": 0.95,
+      "test_count": 10
+    },
+    "generated_reports": [
+      {
+        "report_name": "quick_summary",
+        "report_type": "html",
+        "report_path": "/output/quick_summary.html"
+      },
+      {
+        "report_name": "detailed_metrics",
+        "report_type": "pdf",
+        "report_path": "/output/detailed_metrics.pdf"
+      }
+    ]
+  }
+  ```
+
+  Learn how to add a report to the test container: [Technical reports](custom-test-containers.md#adding-technical-reports-in-custom-test-containers)
+
 ### Manifest Declaration
 
 Each container includes a `manifest.yaml` describing its capabilities:
@@ -660,6 +1263,125 @@ output_metrics:
   - name: "attack_success_rate"
     type: "float"
     description: "Percentage of successful attacks (0.0 to 1.0)"
+
+output_reports:
+  - name: "quick_summary"
+    type: "html"
+    description: "A quick HTML summary report of the Advanced Security Tester"
+  - name: "detailed_metrics"
+    type: "pdf"
+    description: "PDF metrics report for the Advanced Security Tester"
+
+input_datasets:
+  - name: "evaluation_data"
+    type: "huggingface"
+    required: true
+    description: "Evaluation dataset for testing"
+    features:
+      - name: "prompt"
+        dtype: "string"
+        description: "Input prompt text"
+      - name: "response"
+        dtype: "string"
+        description: "Expected response"
+
+output_datasets:
+  - name: "augmented_dataset"
+    type: "huggingface"
+    description: "Generated synthetic dataset"
+    features:
+      - name: "prompt"
+        dtype: "string"
+      - name: "response"
+        dtype: "string"
+      - name: "context"
+        dtype: "string"
+```
+
+### Input Datasets in Manifest
+
+Containers can declare input dataset requirements:
+
+```yaml
+input_datasets:
+  # HuggingFace dataset with required features
+  - name: "evaluation_data"
+    type: "huggingface"
+    required: true
+    description: "Evaluation dataset for testing"
+    features:
+      - name: "prompt"
+        dtype: "string"
+        description: "Input prompt text"
+      - name: "response"
+        dtype: "string"
+        description: "Expected response"
+  
+  # PDF document input
+  - name: "source_documents_pdf"
+    type: "pdf"
+    required: true
+    description: "Source PDF documents for processing"
+  
+  # Text file input
+  - name: "corpus_txt"
+    type: "txt"
+    required: false
+    description: "Optional text corpus"
+```
+
+**Dataset Types:**
+- `huggingface`: Structured datasets (requires `features` field)
+- `pdf`: PDF documents
+- `txt`: Plain text files
+
+**Feature Data Types:**
+Common HuggingFace dataset dtypes include:
+- `string`: Text data
+- `int32`, `int64`: Integer values
+- `float32`, `float64`, `float`, `double`: Floating-point values
+- `bool`: Boolean values
+
+See [HuggingFace documentation](https://huggingface.co/docs/datasets/about_dataset_features) for complete list.
+
+### Output Datasets in Manifest
+
+Containers can declare datasets they will generate:
+
+```yaml
+output_datasets:
+  - name: "augmented_dataset"
+    type: "huggingface"
+    description: "Augmented version of input dataset"
+    features:
+      - name: "prompt"
+        dtype: "string"
+      - name: "response"
+        dtype: "string"
+      - name: "metadata"
+        dtype: "string"
+```
+
+Containers return generated dataset information in JSON output:
+
+```json
+{
+  "results": {
+    "success": true
+  },
+  "generated_datasets": [
+    {
+      "dataset_name": "augmented_dataset",
+      "dataset_type": "huggingface",
+      "dataset_path": "/output/augmented_data",
+      "format": "parquet",
+      "metadata": {
+        "num_rows": 1000,
+        "num_columns": 3
+      }
+    }
+  ]
+}
 ```
 
 ## Validation and Error Handling

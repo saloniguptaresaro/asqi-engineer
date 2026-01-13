@@ -1,9 +1,55 @@
+from enum import StrEnum
 from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import (
+    BaseModel,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 
 # This is necessary because pydantic prefers Annotated types outside classes
 IDsStringPattern = Annotated[str, StringConstraints(pattern="^[0-9a-z_]{1,32}$")]
+
+# HuggingFace dataset dtypes as a Literal for better JSON schema support
+# Complete list from: https://huggingface.co/docs/datasets/v4.4.2/en/package_reference/main_classes#datasets.Value
+HFDtype = Literal[
+    "null",
+    "bool",
+    "int8",
+    "int16",
+    "int32",
+    "int64",
+    "uint8",
+    "uint16",
+    "uint32",
+    "uint64",
+    "float16",
+    "float32",
+    "float",  # alias for float32
+    "float64",
+    "double",  # alias for float64
+    "time32[s]",
+    "time32[ms]",
+    "time64[us]",
+    "time64[ns]",
+    "timestamp[s]",
+    "timestamp[ms]",
+    "timestamp[us]",
+    "timestamp[ns]",
+    "date32",
+    "date64",
+    "duration[s]",
+    "duration[ms]",
+    "duration[us]",
+    "duration[ns]",
+    "binary",
+    "large_binary",
+    "binary_view",
+    "string",
+    "large_string",
+    "string_view",
+]
 
 # ----------------------------------------------------------------------------
 # Schemas for manifest.yaml (Embedded in Test Containers)
@@ -17,8 +63,9 @@ class SystemInput(BaseModel):
         ...,
         description="The system input name, e.g., 'system_under_test', 'simulator_system', 'evaluator_system'.",
     )
-    type: str = Field(
-        ..., description="The system type, e.g., 'llm_api','rest_api' or 'rag_api'."
+    type: Union[str, List[str]] = Field(
+        ...,
+        description="The system type(s) accepted. Can be a single string (e.g., 'llm_api') or a list of strings (e.g., ['llm_api', 'vlm_api']) for containers that support multiple system types. Valid types: 'llm_api', 'rest_api', 'rag_api', 'image_generation_api', 'image_editing_api', 'vlm_api'.",
     )
     required: bool = Field(True, description="Whether this system input is required.")
     description: Optional[str] = Field(
@@ -67,6 +114,117 @@ class EnvironmentVariable(BaseModel):
     )
 
 
+class DatasetFeature(BaseModel):
+    """Defines a feature/column within a dataset.
+
+    The dtype field uses HuggingFace datasets dtype values.
+    Common types: 'string', 'int64', 'float32', 'bool'.
+    """
+
+    name: str = Field(
+        ...,
+        description="The name of the feature.",
+    )
+    dtype: HFDtype = Field(
+        ...,
+        description="The data type of the feature. "
+        "Common types: 'string', 'int64', 'int32', 'float64', 'float32', 'bool'. "
+        "See: https://huggingface.co/docs/datasets/about_dataset_features",
+    )
+    description: Optional[str] = Field(
+        None, description="Description of the feature - data type, purpose etc."
+    )
+
+
+class DatasetType(StrEnum):
+    """Supported dataset types for InputDataset."""
+
+    HUGGINGFACE = "huggingface"
+    PDF = "pdf"
+    TXT = "txt"
+
+
+class InputDataset(BaseModel):
+    """Defines a dataset input that the container requires.
+
+    Supported dataset types:
+    - 'huggingface': HuggingFace datasets (requires features to be defined)
+    - 'pdf': PDF documents
+    - 'txt': Plain text files
+
+    Supports "either/or" relationships by accepting multiple types:
+    - type: "pdf" - Single type
+    - type: ["pdf", "txt"] - Either PDF or TXT
+    - type: ["huggingface", "pdf", "txt"] - Any of these formats
+    """
+
+    name: str = Field(
+        ...,
+        description="The dataset name, e.g., 'evaluation_data', 'test_prompts'.",
+    )
+    required: bool = Field(
+        True, description="Whether this dataset is mandatory for execution."
+    )
+    type: Union[DatasetType, List[DatasetType]] = Field(
+        ...,
+        description="The dataset type(s): single type or list of accepted types. "
+        "Examples: 'huggingface', ['pdf', 'txt'], or ['huggingface', 'pdf', 'txt'].",
+    )
+    description: Optional[str] = Field(
+        None, description="Description of the dataset's role in the test."
+    )
+    features: Optional[list[DatasetFeature]] = Field(
+        None,
+        description="List of required features within a HuggingFace dataset.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_features_for_huggingface(self) -> "InputDataset":
+        """Ensure HuggingFace datasets have features defined whenever huggingface is an accepted type."""
+        types = self.type if isinstance(self.type, list) else [self.type]
+        if DatasetType.HUGGINGFACE in types and not self.features:
+            raise ValueError(
+                "Features must be defined when 'huggingface' is an accepted dataset type. "
+                "Specify the expected feature names and dtypes in the features list."
+            )
+        return self
+
+
+class OutputReports(BaseModel):
+    """Defines a report that will be generated by the test container."""
+
+    name: str = Field(
+        ...,
+        description="The name of the report ('detailed_report', 'summary_report', ...).",
+    )
+    type: Literal["pdf", "html"] = Field(
+        ..., description="The report file format ('pdf' or 'html')."
+    )
+    description: Optional[str] = Field(
+        None, description="Short description of the report content."
+    )
+
+
+# This is a slightly relaxed version of input dataset, if provided could be used for validation
+class OutputDataset(BaseModel):
+    """Defines a dataset output that will be generated by the test container."""
+
+    name: str = Field(
+        ...,
+        description="The name of this output dataset (e.g., 'augmented_rag_data')",
+    )
+    type: DatasetType = Field(
+        ..., description="Type of dataset: huggingface, pdf, or txt"
+    )
+    description: Optional[str] = Field(
+        None, description="Description of the output dataset's purpose and contents"
+    )
+    features: Optional[list[DatasetFeature]] = Field(
+        None,
+        description="List of required features within a HuggingFace dataset",
+    )
+
+
 class Manifest(BaseModel):
     """Schema for the manifest.yaml file inside a test container."""
 
@@ -78,11 +236,15 @@ class Manifest(BaseModel):
         description="Whether the container requires host access (e.g., for Docker-in-Docker).",
     )
     input_systems: List[SystemInput] = Field(
-        ...,
-        description="Systems required as input. Should minimally include a system_under_test",
+        [],
+        description="Systems required as input. Can be empty for containers that don't require systems (e.g., pure data transformation).",
     )
     input_schema: List[InputParameter] = Field(
         [], description="Defines the schema for the user-provided 'params' object."
+    )
+    input_datasets: list[InputDataset] = Field(
+        [],
+        description="Defines the schema for user-provided input datasets.",
     )
     output_metrics: Union[List[str], List[OutputMetric]] = Field(
         [],
@@ -92,6 +254,14 @@ class Manifest(BaseModel):
     environment_variables: List[EnvironmentVariable] = Field(
         [],
         description="Environment variables required by this test container. Used for validation and documentation.",
+    )
+    output_reports: List[OutputReports] = Field(
+        default_factory=list,
+        description="Defines the reports generated by the test container.",
+    )
+    output_datasets: List[OutputDataset] = Field(
+        default_factory=list,
+        description="Defines the datasets generated by the container.",
     )
 
 
@@ -138,6 +308,15 @@ class LLMAPIParams(BaseModel):
     )
 
 
+class VLMAPIParams(LLMAPIParams):
+    """Parameters for Vision Language Model API systems."""
+
+    supports_vision: Literal[True] = Field(
+        True,
+        description="Whether the VLM system supports vision. Forced to True for vlm_api type.",
+    )
+
+
 class LLMAPIConfig(SystemDefinition):
     """Configuration for LLM API systems."""
 
@@ -167,6 +346,54 @@ class RAGAPIConfig(SystemDefinition):
     )
 
 
+# Image Generation API system
+
+
+class ImageGenerationAPIConfig(SystemDefinition):
+    """Configuration for Image Generation API systems."""
+
+    type: Literal["image_generation_api"] = Field(
+        ...,
+        description="Image Generation API system: image_generation_api",
+    )
+    params: LLMAPIParams = Field(
+        ...,
+        description="Parameters specific to the Image Generation API system (e.g., base url, model name, API key and env file).",
+    )
+
+
+# Image Editing API system
+
+
+class ImageEditingAPIConfig(SystemDefinition):
+    """Configuration for Image Editing API systems."""
+
+    type: Literal["image_editing_api"] = Field(
+        ...,
+        description="Image Editing API system: image_editing_api",
+    )
+    params: LLMAPIParams = Field(
+        ...,
+        description="Parameters specific to the Image Editing API system (e.g., base url, model name, API key and env file).",
+    )
+
+
+# VLM API system
+
+
+class VLMAPIConfig(SystemDefinition):
+    """Configuration for Vision Language Model API systems."""
+
+    type: Literal["vlm_api"] = Field(
+        ...,
+        description="Vision Language Model API system: vlm_api",
+    )
+    params: VLMAPIParams = Field(
+        ...,
+        description="Parameters specific to the VLM API system (e.g., base url, model name, API key, env file, and vision support).",
+    )
+
+
 # Generic system
 
 
@@ -186,7 +413,14 @@ class GenericSystemConfig(SystemDefinition):
     )
 
 
-SystemConfig = Union[LLMAPIConfig, RAGAPIConfig, GenericSystemConfig]
+SystemConfig = Union[
+    LLMAPIConfig,
+    RAGAPIConfig,
+    ImageGenerationAPIConfig,
+    ImageEditingAPIConfig,
+    VLMAPIConfig,
+    GenericSystemConfig,
+]
 
 
 class SystemsConfig(BaseModel):
@@ -206,7 +440,134 @@ class SystemsConfig(BaseModel):
 
 
 # ----------------------------------------------------------------------------
-# Schema for test_suite.yaml (User-provided)
+# Schema for Dataset Registry (User-provided)
+# ----------------------------------------------------------------------------
+
+
+class DatasetLoaderParams(BaseModel):
+    """Parameters for loading a HuggingFace dataset from the mounted folder in the container."""
+
+    builder_name: Literal[
+        "json",
+        "csv",
+        "parquet",
+        "arrow",
+        "text",
+        "xml",
+        "webdataset",
+        "imagefolder",
+        "audiofolder",
+        "videofolder",
+    ] = Field(
+        ...,
+        description="The dataset builder name. Gets passed to datasets.load_dataset() as the path argument.",
+    )
+    data_dir: Optional[str] = Field(
+        None,
+        description="Directory containing dataset files, relative to the input mount.",
+    )
+    data_files: Optional[Union[str, list[str]]] = Field(
+        None,
+        description="Single file path or list of file paths, relative to the input mount.",
+    )
+    revision: Optional[str] = Field(
+        None,
+        description="Git revision (commit hash, tag, or branch) for HuggingFace Hub datasets. "
+        "Required for security when loading datasets from the Hub. "
+        "Not needed for local file loaders (json, csv, parquet, etc.).",
+    )
+
+    @model_validator(mode="after")
+    def _validate_data_source(self) -> "DatasetLoaderParams":
+        if (self.data_dir is None) == (self.data_files is None):
+            raise ValueError("Exactly one of data_dir or data_files must be provided.")
+        return self
+
+
+class HFDatasetDefinition(BaseModel):
+    """Defines a reusable HuggingFace dataset that can be referenced by name in test suites and generation jobs."""
+
+    type: Literal["huggingface"] = Field(
+        ...,
+        description="Dataset type identifier for HuggingFace datasets.",
+    )
+    description: Optional[str] = Field(
+        None,
+        description="Human-readable description of the dataset's purpose and contents.",
+    )
+    loader_params: DatasetLoaderParams = Field(
+        ...,
+        description="Configuration for loading the dataset from files or directories.",
+    )
+    mapping: dict[str, str] = Field(
+        default_factory=dict,
+        description="Optional mapping from manifest feature names to actual dataset column names.",
+    )
+    tags: list[str] = Field(
+        default_factory=list,
+        description="Optional tags for categorization (e.g., ['evaluation', 'en']).",
+    )
+
+
+class FileDatasetBase(BaseModel):
+    """Base class for file-based dataset definitions."""
+
+    description: Optional[str] = Field(
+        None,
+        description="Human-readable description of the dataset's purpose and contents.",
+    )
+    file_path: str = Field(
+        ...,
+        description="Path to the input file, relative to the input mount. Can be a local path or remote URL depending on container support.",
+    )
+    tags: list[str] = Field(
+        default_factory=list,
+        description="Optional tags for categorization (e.g., ['evaluation', 'en']).",
+    )
+
+
+class PDFDatasetDefinition(FileDatasetBase):
+    """Defines a PDF document dataset that can be referenced by name in test suites and generation jobs."""
+
+    type: Literal["pdf"] = Field(
+        ...,
+        description="Dataset type identifier for PDF documents.",
+    )
+
+
+class TXTDatasetDefinition(FileDatasetBase):
+    """Defines a plain text file dataset that can be referenced by name in test suites and generation jobs."""
+
+    type: Literal["txt"] = Field(
+        ...,
+        description="Dataset type identifier for plain text files.",
+    )
+
+
+DatasetDefinition = Annotated[
+    Union[HFDatasetDefinition, PDFDatasetDefinition, TXTDatasetDefinition],
+    Field(discriminator="type"),
+]
+
+
+class DatasetsConfig(BaseModel):
+    """Schema for datasets configuration file.
+
+    Datasets are defined in a dictionary where keys are dataset names.
+    Each dataset must specify a 'type' field that determines its schema:
+    - 'huggingface': HuggingFace datasets with loader_params
+    - 'pdf': PDF document datasets with file_path
+    - 'txt': Plain text file datasets with file_path
+    """
+
+    datasets: Dict[str, DatasetDefinition] = Field(
+        ...,
+        description="Dictionary of dataset definitions, keyed by dataset name. Each definition can be HFDatasetDefinition, PDFDatasetDefinition, or TXTDatasetDefinition (discriminated by 'type' field).",
+    )
+
+
+# ----------------------------------------------------------------------------
+# Schema for Test Suite (User-provided)
 # ----------------------------------------------------------------------------
 
 
@@ -226,6 +587,10 @@ class TestDefinitionBase(BaseModel):
     )
     params: Optional[Dict[str, Any]] = Field(
         None, description="Parameters to be passed to the test container's entrypoint."
+    )
+    input_datasets: Optional[Dict[str, str]] = Field(
+        None,
+        description="Input dataset names mapped to dataset registry references. Values must be dataset names defined in the datasets registry config (--datasets-config).",
     )
     volumes: Optional[Dict[str, Any]] = Field(
         None, description="Optional input/output mounts."
@@ -295,6 +660,10 @@ class ScoreCardFilter(BaseModel):
     test_id: str = Field(
         ...,
         description="Test id to filter by, e.g., 'run_mock_on_compatible_sut'",
+    )
+    target_system_type: Optional[Union[str, List[str]]] = Field(
+        None,
+        description="Optional: Filter by system type(s). Can be a single type (e.g., 'llm_api') or a list of types (e.g., ['llm_api', 'vlm_api']). If omitted, applies to all system types.",
     )
 
 
@@ -367,6 +736,12 @@ class ScoreCardIndicator(BaseModel):
     assessment: List[AssessmentRule] = Field(
         ..., description="List of assessment rules to evaluate against the metric"
     )
+    display_reports: List[str] = Field(
+        default_factory=list,
+        description=(
+            "List of report names to include from the test container manifest."
+        ),
+    )
 
 
 # ----------------------------------------------------------------------------
@@ -428,6 +803,10 @@ class ScoreCard(BaseModel):
 # ----------------------------------------------------------------------------
 class AuditResponse(BaseModel):
     indicator_id: str = Field(..., description="ID of the audit indicator")
+    sut_name: Optional[str] = Field(
+        None,
+        description="Name of the system under test this response applies to. If omitted, applies globally.",
+    )
     selected_outcome: str = Field(
         ..., description="Letter grade or label (A–E, PASS/FAIL, etc.)."
     )
@@ -436,3 +815,47 @@ class AuditResponse(BaseModel):
 
 class AuditResponses(BaseModel):
     responses: List[AuditResponse]
+
+
+# ----------------------------------------------------------------------------
+# Schema for Data Generation Jobs
+# ----------------------------------------------------------------------------
+class GenerationJobConfig(BaseModel):
+    id: str = Field(..., description="Unique identifier for the generation job")
+    systems: Optional[Dict[str, str]] = Field(
+        None, description="Mapping of system alias to system identifier"
+    )
+    name: str = Field(..., description="Human-readable data generation job name")
+    image: str = Field(
+        ..., description="Container image to run the data generation job"
+    )
+    tags: Optional[List[str]] = Field(
+        None, description="Optional tags for filtering and reporting."
+    )
+    input_datasets: Optional[Dict[str, str]] = Field(
+        None,
+        description="Input dataset names mapped to dataset registry references. Values must be dataset names defined in the datasets registry config (--datasets-config).",
+    )
+    params: Optional[Dict[str, Any]] = Field(
+        None, description="Parameters to be passed to the test container's entrypoint."
+    )
+    volumes: Optional[Dict[str, Any]] = Field(
+        None, description="Optional input/output mounts."
+    )
+    env_file: Optional[str] = Field(
+        None,
+        description="Path to .env file containing environment variables for this test's container execution (e.g., '.env', 'test.env').",
+    )
+    environment: Optional[Dict[str, str]] = Field(
+        None,
+        description="Dictionary of environment variables to pass to the test container. Supports interpolation syntax (e.g., {'OPENAI_API_KEY': '${OPENAI_API_KEY}'}).",
+    )
+
+
+class DataGenerationConfig(BaseModel):
+    """Schema for the data generation configuration manifest."""
+
+    job_name: str = Field(..., description="Name of the data generation job")
+    generation_jobs: List[GenerationJobConfig] = Field(
+        ..., description="List of generation jobs to execute"
+    )

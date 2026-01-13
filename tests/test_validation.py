@@ -5,41 +5,57 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
+from asqi.config import ExecutionMode
 from asqi.errors import DuplicateIDError, MissingIDFieldError
 from asqi.main import load_and_validate_plan
 from asqi.rag_response_schema import RAGCitation, RAGContext, validate_rag_response
+from asqi.response_schemas import GeneratedDataset
 from asqi.schemas import (
     AssessmentRule,
+    AuditScoreCardIndicator,
+    DataGenerationConfig,
+    DatasetFeature,
+    GenerationJobConfig,
     GenericSystemConfig,
+    InputParameter,
     LLMAPIConfig,
     LLMAPIParams,
     Manifest,
+    OutputDataset,
+    OutputReports,
     RAGAPIConfig,
     ScoreCard,
     ScoreCardFilter,
     ScoreCardIndicator,
     SuiteConfig,
+    SystemInput,
     SystemsConfig,
+    VLMAPIConfig,
 )
 from asqi.score_card_engine import ScoreCardEngine
 from asqi.validation import (
+    create_data_generation_plan,
     create_test_execution_plan,
     find_manifest_for_image,
+    validate_data_generation_input,
+    validate_data_generation_plan,
     validate_execution_inputs,
+    validate_generated_datasets,
     validate_ids,
+    validate_indicator_display_reports,
     validate_manifests_against_tests,
     validate_score_card_inputs,
     validate_system_compatibility,
     validate_test_execution_inputs,
-    validate_test_parameters,
+    validate_parameters,
     validate_test_plan,
     validate_test_volumes,
     validate_workflow_configurations,
 )
 from asqi.workflow import TestExecutionResult
 from test_data import (
-    MOCK_SCORE_CARD_CONFIG,
     MOCK_AUDIT_RESPONSES,
+    MOCK_SCORE_CARD_CONFIG,
 )
 
 # Test data
@@ -69,6 +85,48 @@ test_suite:
           - "my_rag_api"
       params:
           delay_seconds: 1
+"""
+
+DEMO_IMAGE_GENERATION_SUITE_YAML = """
+suite_name: "Mock Image Generation Tester Sanity Check"
+description: "Suite description"
+test_suite:
+  - name: "run_mock_on_compatible_system"
+    id: "run_mock_on_compatible_system"
+    description: "Test description"
+    image: "my-registry/mock_image_generation_tester:latest"
+    systems_under_test:
+      - "my_image_generation_api"
+    params:
+      delay_seconds: 1
+"""
+
+DEMO_IMAGE_EDITING_SUITE_YAML = """
+suite_name: "Mock Image Editing Tester Sanity Check"
+description: "Suite description"
+test_suite:
+  - name: "run_mock_on_compatible_system"
+    id: "run_mock_on_compatible_system"
+    description: "Test description"
+    image: "my-registry/mock_image_editing_tester:latest"
+    systems_under_test:
+      - "my_image_editing_api"
+    params:
+      delay_seconds: 1
+"""
+
+DEMO_VLM_SUITE_YAML = """
+suite_name: "Mock VLM Tester Sanity Check"
+description: "Suite description"
+test_suite:
+  - name: "run_mock_on_compatible_system"
+    id: "run_mock_on_compatible_system"
+    description: "Test description"
+    image: "my-registry/vlm_evaluator_tester:latest"
+    systems_under_test:
+      - "my_vlm_api"
+    params:
+      delay_seconds: 1
 """
 
 DEMO_systems_YAML = """
@@ -167,6 +225,116 @@ MOCK_MULTIPLE_MANIFEST = {
     "output_metrics": ["status", "probes_run", "total_failed"],
 }
 
+MOCK_IMAGE_GENERATION_MANIFEST = {
+    "name": "mock_image_generation_tester",
+    "version": "1.0.0",
+    "description": "A lightweight mock container for testing image generation systems with response validation.",
+    "input_systems": [
+        {"name": "system_under_test", "type": "image_generation_api", "required": True},
+    ],
+    "input_schema": [
+        {
+            "name": "delay_seconds",
+            "type": "integer",
+            "required": False,
+            "description": "Seconds to sleep to simulate work.",
+        },
+        {
+            "name": "prompt",
+            "type": "string",
+            "required": False,
+            "description": "Text prompt for image generation (optional override)",
+        },
+        {
+            "name": "response_format",
+            "type": "string",
+            "required": False,
+            "description": "Response format: 'url' or 'b64_json'",
+        },
+    ],
+    "output_metrics": [
+        "success",
+        "score",
+        "delay_used",
+        "base_url",
+        "model",
+        "num_images",
+        "response_format",
+        "validation",
+    ],
+}
+
+MOCK_IMAGE_EDITING_MANIFEST = {
+    "name": "mock_image_editing_tester",
+    "version": "1.0.0",
+    "description": "A lightweight mock container for testing image editing systems with multipart handling and response validation.",
+    "input_systems": [
+        {"name": "system_under_test", "type": "image_editing_api", "required": True},
+    ],
+    "input_schema": [
+        {
+            "name": "delay_seconds",
+            "type": "integer",
+            "required": False,
+            "description": "Seconds to sleep to simulate work.",
+        },
+        {
+            "name": "prompt",
+            "type": "string",
+            "required": False,
+            "description": "Text prompt describing the desired edit",
+        },
+        {
+            "name": "response_format",
+            "type": "string",
+            "required": False,
+            "description": "Response format: 'url' or 'b64_json'",
+        },
+        {
+            "name": "mask_mode",
+            "type": "string",
+            "required": False,
+            "description": "Type of mask to use: 'none', 'rectangle', 'circle'",
+        },
+    ],
+    "output_metrics": [
+        "success",
+        "score",
+        "delay_used",
+        "base_url",
+        "model",
+        "num_images",
+        "response_format",
+        "mask_mode",
+        "validation",
+    ],
+}
+
+MOCK_VLM_MANIFEST = {
+    "name": "vlm_evaluator_tester",
+    "version": "1.0.0",
+    "description": "A lightweight mock container for testing vision language models.",
+    "input_systems": [
+        {"name": "system_under_test", "type": "vlm_api", "required": True},
+    ],
+    "input_schema": [
+        {
+            "name": "delay_seconds",
+            "type": "integer",
+            "required": False,
+            "description": "Seconds to sleep to simulate work.",
+        }
+    ],
+    "output_metrics": [
+        "success",
+        "score",
+        "delay_used",
+        "base_url",
+        "model",
+        "supports_vision",
+    ],
+}
+
 
 @pytest.fixture
 def demo_suite():
@@ -179,6 +347,27 @@ def demo_suite():
 def demo_rag_suite():
     """Fixture providing parsed demo test suite."""
     data = yaml.safe_load(DEMO_RAG_SUITE_YAML)
+    return SuiteConfig(**data)
+
+
+@pytest.fixture
+def demo_image_generation_suite():
+    """Fixture providing parsed demo image generation test suite."""
+    data = yaml.safe_load(DEMO_IMAGE_GENERATION_SUITE_YAML)
+    return SuiteConfig(**data)
+
+
+@pytest.fixture
+def demo_image_editing_suite():
+    """Fixture providing parsed demo image editing test suite."""
+    data = yaml.safe_load(DEMO_IMAGE_EDITING_SUITE_YAML)
+    return SuiteConfig(**data)
+
+
+@pytest.fixture
+def demo_vlm_suite():
+    """Fixture providing parsed demo VLM test suite."""
+    data = yaml.safe_load(DEMO_VLM_SUITE_YAML)
     return SuiteConfig(**data)
 
 
@@ -197,6 +386,13 @@ def manifests():
         "my-registry/mock_rag_tester:latest": Manifest(**MOCK_RAG_TESTER_MANIFEST),
         "my-registry/generic:latest": Manifest(**MOCK_GENERIC_MANIFEST),
         "my-registry/garak:latest": Manifest(**MOCK_MULTIPLE_MANIFEST),
+        "my-registry/mock_image_generation_tester:latest": Manifest(
+            **MOCK_IMAGE_GENERATION_MANIFEST
+        ),
+        "my-registry/mock_image_editing_tester:latest": Manifest(
+            **MOCK_IMAGE_EDITING_MANIFEST
+        ),
+        "my-registry/vlm_evaluator_tester:latest": Manifest(**MOCK_VLM_MANIFEST),
     }
 
 
@@ -388,6 +584,95 @@ class TestSchemaValidation:
         errors = validate_test_plan(demo_rag_suite, system, manifests)
         assert errors == [], f"Expected no errors, but got: {errors}"
 
+    def test_image_generation_system_compatibility(
+        self, demo_image_generation_suite, manifests
+    ):
+        """Test validation passes for image generation systems."""
+        # Create systems config with image generation system
+        image_gen_systems = SystemsConfig(
+            systems={
+                "my_image_generation_api": {
+                    "type": "image_generation_api",
+                    "description": "Test image generation system",
+                    "provider": "openai",
+                    "params": {
+                        "base_url": "http://test-url",
+                        "model": "dall-e-3",
+                        "api_key": "sk-test",
+                    },
+                }
+            }
+        )
+
+        errors = validate_test_plan(
+            demo_image_generation_suite, image_gen_systems, manifests
+        )
+        assert errors == [], (
+            f"Expected no errors for image generation system, but got: {errors}"
+        )
+
+    def test_image_editing_system_compatibility(
+        self, demo_image_editing_suite, manifests
+    ):
+        """Test validation passes for image editing systems."""
+        # Create systems config with image editing system
+        image_edit_systems = SystemsConfig(
+            systems={
+                "my_image_editing_api": {
+                    "type": "image_editing_api",
+                    "description": "Test image editing system",
+                    "provider": "openai",
+                    "params": {
+                        "base_url": "http://test-url",
+                        "model": "dall-e-2",
+                        "api_key": "sk-test",
+                    },
+                }
+            }
+        )
+
+        errors = validate_test_plan(
+            demo_image_editing_suite, image_edit_systems, manifests
+        )
+        assert errors == [], (
+            f"Expected no errors for image editing system, but got: {errors}"
+        )
+
+    def test_vlm_system_compatibility(self, demo_vlm_suite, manifests):
+        """Test validation passes for VLM systems."""
+        # Create systems config with VLM system
+        vlm_systems = SystemsConfig(
+            systems={
+                "my_vlm_api": {
+                    "type": "vlm_api",
+                    "description": "Test VLM system",
+                    "provider": "openai",
+                    "params": {
+                        "base_url": "http://test-url",
+                        "model": "gpt-4o",
+                        "api_key": "sk-test",
+                    },
+                }
+            }
+        )
+
+        errors = validate_test_plan(demo_vlm_suite, vlm_systems, manifests)
+        assert errors == [], f"Expected no errors for VLM system, but got: {errors}"
+
+    def test_vlm_vision_enforcement(self):
+        """Test that supports_vision must be True for VLM systems."""
+        with pytest.raises(ValidationError) as excinfo:
+            VLMAPIConfig(
+                type="vlm_api",
+                params={
+                    "base_url": "http://localhost:4000/v1",
+                    "model": "gpt-4o",
+                    "supports_vision": False,
+                },
+            )
+        assert "supports_vision" in str(excinfo.value)
+        assert "Input should be True" in str(excinfo.value)
+
     def test_manifest_schema_validation(self, manifests):
         """Test that manifests parse correctly."""
         mock_manifest = manifests["my-registry/mock_tester:latest"]
@@ -399,6 +684,26 @@ class TestSchemaValidation:
         assert rag_manifest.name == "mock_rag_tester"
         assert len(rag_manifest.input_systems) == 1
         assert rag_manifest.input_systems[0].type == "rag_api"
+
+        # Check image generation manifest
+        image_gen_manifest = manifests[
+            "my-registry/mock_image_generation_tester:latest"
+        ]
+        assert image_gen_manifest.name == "mock_image_generation_tester"
+        assert len(image_gen_manifest.input_systems) == 1
+        assert image_gen_manifest.input_systems[0].type == "image_generation_api"
+
+        # Check image editing manifest
+        image_edit_manifest = manifests["my-registry/mock_image_editing_tester:latest"]
+        assert image_edit_manifest.name == "mock_image_editing_tester"
+        assert len(image_edit_manifest.input_systems) == 1
+        assert image_edit_manifest.input_systems[0].type == "image_editing_api"
+
+        # Check VLM manifest
+        vlm_manifest = manifests["my-registry/vlm_evaluator_tester:latest"]
+        assert vlm_manifest.name == "vlm_evaluator_tester"
+        assert len(vlm_manifest.input_systems) == 1
+        assert vlm_manifest.input_systems[0].type == "vlm_api"
 
 
 class TestCrossFileValidation:
@@ -659,9 +964,97 @@ class TestEdgeCases:
         errors = validate_test_plan(suite, demo_systems, manifests)
         assert errors == []  # Should be valid since delay_seconds is optional
 
+    def test_system_role_validation_with_required_and_optional_systems(self, manifests):
+        """Test that validation correctly handles both required and optional systems in test.systems field."""
+        # Create a manifest with both required and optional systems
+        test_manifest = {
+            "name": "test_container",
+            "version": "1.0.0",
+            "description": "Test container with required and optional systems",
+            "input_systems": [
+                {"name": "system_under_test", "type": "llm_api", "required": True},
+                {"name": "evaluator_system", "type": "llm_api", "required": False},
+            ],
+            "input_schema": [],
+            "output_metrics": ["success"],
+        }
+
+        test_manifests = {"test/image:latest": Manifest(**test_manifest)}
+
+        # Create systems config
+        systems_config = SystemsConfig(
+            systems={
+                "my_llm": LLMAPIConfig(
+                    type="llm_api",
+                    description="Test LLM",
+                    provider="openai",
+                    params=LLMAPIParams(
+                        base_url="http://test",
+                        model="gpt-4",
+                    ),
+                ),
+                "my_evaluator": LLMAPIConfig(
+                    type="llm_api",
+                    description="Test Evaluator",
+                    provider="openai",
+                    params=LLMAPIParams(
+                        base_url="http://evaluator",
+                        model="gpt-4",
+                    ),
+                ),
+            }
+        )
+
+        # Test case: test includes both required (system_under_test) and optional (evaluator_system) systems
+        suite_data = {
+            "suite_name": "Test Required and Optional Systems",
+            "description": "Suite description",
+            "test_suite": [
+                {
+                    "name": "test_with_both_systems",
+                    "id": "test_with_both_systems",
+                    "description": "Test with both required and optional systems",
+                    "image": "test/image:latest",
+                    "systems_under_test": ["my_llm"],
+                    "systems": {
+                        "evaluator_system": "my_evaluator"  # optional system
+                    },
+                    "params": {},
+                }
+            ],
+        }
+
+        suite = SuiteConfig(**suite_data)
+        errors = validate_test_plan(suite, systems_config, test_manifests)
+        assert errors == [], (
+            f"Expected no errors for valid required+optional systems, but got: {errors}"
+        )
+
+        # Test case: test includes only required system (optional system not specified)
+        suite_data_minimal = {
+            "suite_name": "Test Required System Only",
+            "description": "Suite description",
+            "test_suite": [
+                {
+                    "name": "test_required_only",
+                    "id": "test_required_only",
+                    "description": "Test with only required system",
+                    "image": "test/image:latest",
+                    "systems_under_test": ["my_llm"],
+                    "params": {},
+                }
+            ],
+        }
+
+        suite_minimal = SuiteConfig(**suite_data_minimal)
+        errors = validate_test_plan(suite_minimal, systems_config, test_manifests)
+        assert errors == [], (
+            f"Expected no errors for required system only, but got: {errors}"
+        )
+
 
 class TestValidationFunctions:
-    def test_validate_test_parameters(self, manifests):
+    def test_validate_parameters(self, manifests):
         manifest = manifests["my-registry/mock_tester:latest"]
 
         # Test with missing required param (none required)
@@ -670,12 +1063,12 @@ class TestValidationFunctions:
             params = {}
 
         test = DummyTest()
-        errors = validate_test_parameters(test, manifest)
+        errors = validate_parameters(test, manifest)
         assert errors == []
 
         # Test with unknown param
         test.params = {"foo": 1}
-        errors = validate_test_parameters(test, manifest)
+        errors = validate_parameters(test, manifest)
         assert any("Unknown parameter 'foo'" in e for e in errors)
 
         # Test with required param (garak)
@@ -683,10 +1076,10 @@ class TestValidationFunctions:
         test2 = DummyTest()
         test2.name = "t2"
         test2.params = {}
-        errors = validate_test_parameters(test2, garak_manifest)
+        errors = validate_parameters(test2, garak_manifest)
         assert any("Missing required parameter 'probes'" in e for e in errors)
         test2.params = {"probes": ["p1"]}
-        errors = validate_test_parameters(test2, garak_manifest)
+        errors = validate_parameters(test2, garak_manifest)
         assert errors == []
 
     def test_validate_system_compatibility(self, demo_systems, manifests):
@@ -706,7 +1099,7 @@ class TestValidationFunctions:
         # Unknown system
         test.systems_under_test = ["not_a_system"]
         errors = validate_system_compatibility(test, demo_systems.systems, manifest)
-        assert any("Unknown system 'not_a_system'" in e for e in errors)
+        assert any("not_a_system" in e and "Unknown system" in e for e in errors)
 
     def test_validate_system_compatibility_with_additional_systems(self, demo_systems):
         """Test validation of additional systems from test.systems field."""
@@ -864,13 +1257,13 @@ class TestValidationInputFunctions:
         validate_execution_inputs(
             suite_path="suite.yaml",
             systems_path="systems.yaml",
-            execution_mode="tests_only",
+            execution_mode=ExecutionMode.TESTS_ONLY,
             output_path="output.json",
         )
         validate_execution_inputs(
             suite_path="suite.yaml",
             systems_path="systems.yaml",
-            execution_mode="end_to_end",
+            execution_mode=ExecutionMode.END_TO_END,
             output_path=None,
         )
 
@@ -878,15 +1271,17 @@ class TestValidationInputFunctions:
         """Test invalid execution inputs."""
         # Invalid suite_path - empty string
         with pytest.raises(ValueError, match="Invalid suite_path"):
-            validate_execution_inputs("", "systems.yaml", "tests_only")
+            validate_execution_inputs("", "systems.yaml", ExecutionMode.TESTS_ONLY)
 
         # Invalid systems_path - empty string
         with pytest.raises(ValueError, match="Invalid systems_path"):
-            validate_execution_inputs("suite.yaml", "", "tests_only")
+            validate_execution_inputs("suite.yaml", "", ExecutionMode.TESTS_ONLY)
 
-        # Invalid execution_mode
+        # Invalid execution_mode - only TESTS_ONLY and END_TO_END are valid
         with pytest.raises(ValueError, match="Invalid execution_mode"):
-            validate_execution_inputs("suite.yaml", "systems.yaml", "invalid_mode")
+            validate_execution_inputs(
+                "suite.yaml", "systems.yaml", ExecutionMode.EVALUATE_ONLY
+            )
 
     def test_validate_score_card_inputs_valid(self):
         """Test valid score card inputs."""
@@ -949,16 +1344,16 @@ class TestValidationInputFunctions:
         validate_execution_inputs(
             suite_path="suite.yaml",
             systems_path="systems.yaml",
-            execution_mode="tests_only",
+            execution_mode=ExecutionMode.TESTS_ONLY,
             audit_responses_data=MOCK_AUDIT_RESPONSES,
             output_path="output.json",
         )
 
-        # Also verify it works with end_to_end mode
+        # Also verify it works with ExecutionMode.END_TO_END
         validate_execution_inputs(
             suite_path="suite.yaml",
             systems_path="systems.yaml",
-            execution_mode="end_to_end",
+            execution_mode=ExecutionMode.END_TO_END,
             audit_responses_data=MOCK_AUDIT_RESPONSES,
             output_path=None,
         )
@@ -970,7 +1365,7 @@ class TestValidationInputFunctions:
             validate_execution_inputs(
                 suite_path="suite.yaml",
                 systems_path="systems.yaml",
-                execution_mode="tests_only",
+                execution_mode=ExecutionMode.TESTS_ONLY,
                 audit_responses_data=["not", "a", "dict"],  # type: ignore[arg-type]
             )
 
@@ -979,7 +1374,7 @@ class TestValidationInputFunctions:
             validate_execution_inputs(
                 suite_path="suite.yaml",
                 systems_path="systems.yaml",
-                execution_mode="tests_only",
+                execution_mode=ExecutionMode.TESTS_ONLY,
                 audit_responses_data="not-a-dict",  # type: ignore[arg-type]
             )
 
@@ -1217,7 +1612,7 @@ class TestCreateExecutionPlanEdgeCases:
 class TestParameterValidationEdgeCases:
     """Test edge cases in parameter validation."""
 
-    def test_validate_test_parameters_with_empty_schema(self):
+    def test_validate_parameters_with_empty_schema(self):
         """Test parameter validation with empty input schema."""
         manifest_data = {
             "name": "no_params_test",
@@ -1236,7 +1631,7 @@ class TestParameterValidationEdgeCases:
             params = {"unexpected_param": "value"}
 
         test = DummyTest()
-        errors = validate_test_parameters(test, manifest)
+        errors = validate_parameters(test, manifest)
         assert any("Unknown parameter 'unexpected_param'" in e for e in errors)
         assert "Valid parameters: none" in errors[0]
 
@@ -1818,3 +2213,1071 @@ class TestRAGResponseSchema:
         # Missing context
         with pytest.raises(KeyError, match="context"):
             validate_rag_response({"choices": [{"message": {"citations": []}}]})
+
+
+class TestValidateIndicatorDisplayReports:
+    @pytest.fixture
+    def test_id_to_image(self):
+        suite = SuiteConfig(
+            suite_name="Test Suite for Report Validation",
+            test_suite=[
+                {
+                    "name": "test report validation",
+                    "id": "test_report_validation",
+                    "image": "report-image:latest",
+                    "systems_under_test": ["my_llm_api"],
+                }
+            ],
+        )
+        test_id_to_image = {test.id: test.image for test in suite.test_suite}
+        return test_id_to_image
+
+    @pytest.fixture
+    def report_validation_manifest(self):
+        manifest = Manifest(
+            name="manifest with reports",
+            version="1.0",
+            input_systems=[
+                {
+                    "name": "system_under_test",
+                    "type": "llm_api",
+                    "required": True,
+                }
+            ],
+            output_reports=[
+                OutputReports(
+                    name="detailed_report",
+                    type="pdf",
+                    description="Detailed test report",
+                ),
+                OutputReports(
+                    name="summary_report",
+                    type="html",
+                    description="Summary report",
+                ),
+            ],
+        )
+        return {"report-image:latest": manifest}
+
+    def create_scorecard_with_reports(self, report_list):
+        return [
+            ScoreCard(
+                score_card_name="Score Card for Report Validation",
+                indicators=[
+                    {
+                        "id": "report_indicator",
+                        "name": "Indicator for report validation",
+                        "apply_to": {"test_id": "test_report_validation"},
+                        "metric": "accuracy",
+                        "assessment": [
+                            {
+                                "outcome": "PASS",
+                                "condition": "greater_equal",
+                                "threshold": 0.9,
+                            }
+                        ],
+                        "display_reports": report_list,
+                    }
+                ],
+            )
+        ]
+
+    def test_reports_defined_in_the_manifest(
+        self, test_id_to_image, report_validation_manifest
+    ):
+        """
+        Test validation passes when requested reports are defined in the manifest.
+        """
+        score_cards = self.create_scorecard_with_reports(
+            ["detailed_report", "summary_report"]
+        )
+        errors = validate_indicator_display_reports(
+            report_validation_manifest, score_cards, test_id_to_image
+        )
+        assert errors == []
+
+    def test_empty_display_reports(self, test_id_to_image, report_validation_manifest):
+        """
+        Test validation passes when display_reports list is empty.
+        """
+        score_cards = self.create_scorecard_with_reports([])
+        errors = validate_indicator_display_reports(
+            report_validation_manifest, score_cards, test_id_to_image
+        )
+        assert errors == []
+
+    def test_invalid_report_name(self, test_id_to_image, report_validation_manifest):
+        """
+        Test validation fails when a requested report name is missing from the manifest.
+        """
+        score_cards = self.create_scorecard_with_reports(["invalid_report"])
+        errors = validate_indicator_display_reports(
+            report_validation_manifest, score_cards, test_id_to_image
+        )
+
+        assert len(errors) == 1
+        assert "invalid_report" in errors[0]
+
+    def test_duplicate_report_names(self, test_id_to_image, report_validation_manifest):
+        """
+        Test validation fails when duplicate report names are specified in the indicator.
+        """
+        score_cards = self.create_scorecard_with_reports(
+            ["detailed_report", "detailed_report"]
+        )
+        errors = validate_indicator_display_reports(
+            report_validation_manifest, score_cards, test_id_to_image
+        )
+
+        assert len(errors) == 1
+        assert (
+            "duplicate report name 'detailed_report' in display_reports"
+            in errors[0].lower()
+        )
+
+    def test_missing_manifest_error(self, test_id_to_image):
+        """
+        Test validation fails when the manifest is missing.
+        """
+        score_cards = self.create_scorecard_with_reports(["detailed_report"])
+        manifests = {}
+
+        errors = validate_indicator_display_reports(
+            manifests, score_cards, test_id_to_image
+        )
+
+        assert len(errors) == 1
+        assert "No manifest found for image 'report-image:latest'" in errors[0]
+
+    def test_manifest_with_no_output_error(self, test_id_to_image):
+        """
+        Tests that validation fails when requesting a report from a manifest with no output_reports.
+        """
+
+        manifest_no_reports = Manifest(
+            name="test_container",
+            version="1.0",
+            input_systems=[
+                {"name": "system_under_test", "type": "llm_api", "required": True}
+            ],
+            output_reports=[],
+        )
+        manifest = {"report-image:latest": manifest_no_reports}
+        score_cards = self.create_scorecard_with_reports(["detailed_report"])
+
+        errors = validate_indicator_display_reports(
+            manifest, score_cards, test_id_to_image
+        )
+
+        assert len(errors) == 1
+        assert (
+            "Manifest for image 'report-image:latest' only defines: none" in errors[0]
+        )
+
+    def test_audit_indicators(self, test_id_to_image, report_validation_manifest):
+        """
+        Tests that audit indicators are skipped during report validation.
+        """
+        audit_indicator = AuditScoreCardIndicator(
+            id="audit_indicator",
+            name="Audit Indicator",
+            display_reports=["detailed_report"],
+            assessment=[{"outcome": "A", "description": "desc"}],
+        )
+
+        score_cards = [
+            ScoreCard(score_card_name="Audit Score Card", indicators=[audit_indicator])
+        ]
+
+        errors = validate_indicator_display_reports(
+            report_validation_manifest, score_cards, test_id_to_image
+        )
+        assert errors == []
+
+    def test_multiple_indicators(self, test_id_to_image, report_validation_manifest):
+        """
+        Test with 2 indicators where only the invalid one produces an error.
+        """
+        valid_indicator = self.create_scorecard_with_reports(["detailed_report"])[
+            0
+        ].indicators[0]
+
+        invalid_indicator = ScoreCardIndicator(
+            id="invalid_report_indicator",
+            name="invalid indicator",
+            apply_to={"test_id": "test_report_validation"},
+            metric="pass_rate",
+            assessment=[
+                {"outcome": "PASS", "condition": "greater_equal", "threshold": 0.8}
+            ],
+            display_reports=["invalid_report_name"],
+        )
+
+        score_cards = [
+            ScoreCard(
+                score_card_name="Score Card with Multiple Indicators",
+                indicators=[valid_indicator, invalid_indicator],
+            )
+        ]
+
+        errors = validate_indicator_display_reports(
+            report_validation_manifest,
+            score_cards,
+            test_id_to_image,
+        )
+
+        assert len(errors) == 1
+        assert "invalid_report_indicator" in errors[0]
+
+    def test_case_sensitive_display_reports_error(
+        self, test_id_to_image, report_validation_manifest
+    ):
+        """
+        Test that requesting reports with incorrect casing results in a failure.
+        """
+        score_cards = self.create_scorecard_with_reports(["Detailed_Report"])
+
+        errors = validate_indicator_display_reports(
+            report_validation_manifest,
+            score_cards,
+            test_id_to_image,
+        )
+
+        assert len(errors) == 1
+        assert "not found with an exact case sensitive match" in errors[0]
+
+
+class TestValidateGeneratedDatasets:
+    """Test validation of generated datasets against manifest declarations."""
+
+    def test_all_datasets_match_manifest(self):
+        """Test that all generated datasets match manifest declarations."""
+        manifest = Manifest(
+            name="test_container",
+            version="1.0",
+            input_systems=[
+                SystemInput(name="system_under_test", type="llm_api", required=True)
+            ],
+            output_datasets=[
+                OutputDataset(
+                    name="augmented_data",
+                    type="huggingface",
+                    description="Augmented dataset",
+                    features=[
+                        DatasetFeature(name="text", dtype="string"),
+                        DatasetFeature(name="label", dtype="int64"),
+                    ],
+                ),
+                OutputDataset(
+                    name="evaluation_data",
+                    type="huggingface",
+                    description="Evaluation dataset",
+                    features=[DatasetFeature(name="prompt", dtype="string")],
+                ),
+            ],
+        )
+
+        generated_datasets = [
+            GeneratedDataset(
+                dataset_name="augmented_data",
+                dataset_type="huggingface",
+                dataset_path="/output/data.parquet",
+            ),
+            GeneratedDataset(
+                dataset_name="evaluation_data",
+                dataset_type="huggingface",
+                dataset_path="/output/eval.parquet",
+            ),
+        ]
+
+        warnings = validate_generated_datasets(
+            manifest, generated_datasets, "test_id", "my-registry/test:latest"
+        )
+
+        assert len(warnings) == 0
+
+    def test_undeclared_dataset_generates_warning(self):
+        """Test that generating an undeclared dataset produces a warning."""
+        manifest = Manifest(
+            name="test_container",
+            version="1.0",
+            input_systems=[
+                SystemInput(name="system_under_test", type="llm_api", required=True)
+            ],
+            output_datasets=[
+                OutputDataset(
+                    name="declared_dataset",
+                    type="huggingface",
+                    features=[DatasetFeature(name="text", dtype="string")],
+                )
+            ],
+        )
+
+        generated_datasets = [
+            GeneratedDataset(
+                dataset_name="undeclared_dataset",
+                dataset_type="huggingface",
+                dataset_path="/output/data.parquet",
+            )
+        ]
+
+        warnings = validate_generated_datasets(
+            manifest, generated_datasets, "test_id", "my-registry/test:latest"
+        )
+
+        assert len(warnings) == 1
+        assert "undeclared_dataset" in warnings[0]
+        assert "not declared in manifest" in warnings[0]
+        assert "declared_dataset" in warnings[0]
+
+    def test_multiple_undeclared_datasets(self):
+        """Test that multiple undeclared datasets generate multiple warnings."""
+        manifest = Manifest(
+            name="test_container",
+            version="1.0",
+            input_systems=[
+                SystemInput(name="system_under_test", type="llm_api", required=True)
+            ],
+            output_datasets=[
+                OutputDataset(
+                    name="declared_dataset",
+                    type="huggingface",
+                    features=[DatasetFeature(name="text", dtype="string")],
+                )
+            ],
+        )
+
+        generated_datasets = [
+            GeneratedDataset(
+                dataset_name="undeclared_1",
+                dataset_type="huggingface",
+                dataset_path="/output/data1.parquet",
+            ),
+            GeneratedDataset(
+                dataset_name="undeclared_2",
+                dataset_type="huggingface",
+                dataset_path="/output/data2.parquet",
+            ),
+        ]
+
+        warnings = validate_generated_datasets(
+            manifest, generated_datasets, "test_id", "my-registry/test:latest"
+        )
+
+        assert len(warnings) == 2
+        assert any("undeclared_1" in w for w in warnings)
+        assert any("undeclared_2" in w for w in warnings)
+
+    def test_no_output_datasets_in_manifest(self):
+        """Test that validation passes when manifest has no output_datasets declared."""
+        manifest = Manifest(
+            name="test_container",
+            version="1.0",
+            input_systems=[
+                SystemInput(name="system_under_test", type="llm_api", required=True)
+            ],
+            output_datasets=[],
+        )
+
+        generated_datasets = [
+            GeneratedDataset(
+                dataset_name="any_dataset",
+                dataset_type="huggingface",
+                dataset_path="/output/data.parquet",
+            )
+        ]
+
+        warnings = validate_generated_datasets(
+            manifest, generated_datasets, "test_id", "my-registry/test:latest"
+        )
+
+        # No warnings because manifest doesn't declare any output_datasets
+        assert len(warnings) == 0
+
+    def test_none_manifest(self):
+        """Test that validation passes gracefully when manifest is None."""
+        generated_datasets = [
+            GeneratedDataset(
+                dataset_name="any_dataset",
+                dataset_type="huggingface",
+                dataset_path="/output/data.parquet",
+            )
+        ]
+
+        warnings = validate_generated_datasets(
+            None, generated_datasets, "test_id", "my-registry/test:latest"
+        )
+
+        assert len(warnings) == 0
+
+    def test_empty_generated_datasets(self):
+        """Test that validation passes when no datasets are generated."""
+        manifest = Manifest(
+            name="test_container",
+            version="1.0",
+            input_systems=[
+                SystemInput(name="system_under_test", type="llm_api", required=True)
+            ],
+            output_datasets=[
+                OutputDataset(
+                    name="declared_dataset",
+                    type="huggingface",
+                    features=[DatasetFeature(name="text", dtype="string")],
+                )
+            ],
+        )
+
+        warnings = validate_generated_datasets(
+            manifest, [], "test_id", "my-registry/test:latest"
+        )
+
+        assert len(warnings) == 0
+
+
+class TestMultipleSystemTypes:
+    """Test validation with manifests that support multiple system types (Issue #287)."""
+
+    MOCK_MULTI_TYPE_MANIFEST = {
+        "name": "multi_type_tester",
+        "version": "1.0.0",
+        "description": "Container that supports both LLM and VLM systems",
+        "input_systems": [
+            {
+                "name": "system_under_test",
+                "type": ["llm_api", "vlm_api"],
+                "required": True,
+            },
+        ],
+        "input_schema": [],
+        "output_metrics": ["success"],
+    }
+
+    MULTI_TYPE_SUITE_LLM = """
+suite_name: "Multi-type test with LLM"
+test_suite:
+  - name: "test_with_llm"
+    id: "test_with_llm"
+    image: "my-registry/multi_type_tester:latest"
+    systems_under_test:
+      - "my_llm_service"
+"""
+
+    MULTI_TYPE_SUITE_VLM = """
+suite_name: "Multi-type test with VLM"
+test_suite:
+  - name: "test_with_vlm"
+    id: "test_with_vlm"
+    image: "my-registry/multi_type_tester:latest"
+    systems_under_test:
+      - "my_vlm_service"
+"""
+
+    MULTI_TYPE_SUITE_INCOMPATIBLE = """
+suite_name: "Multi-type test with RAG (incompatible)"
+test_suite:
+  - name: "test_with_rag"
+    id: "test_with_rag"
+    image: "my-registry/multi_type_tester:latest"
+    systems_under_test:
+      - "my_rag_service"
+"""
+
+    def test_multi_type_manifest_with_llm_system(self):
+        """LLM system should be compatible with manifest supporting ['llm_api', 'vlm_api']."""
+        manifest = Manifest(**self.MOCK_MULTI_TYPE_MANIFEST)
+        suite_config = SuiteConfig.model_validate(
+            yaml.safe_load(self.MULTI_TYPE_SUITE_LLM)
+        )
+        test = suite_config.test_suite[0]
+
+        # Create systems dict with LLM system
+        systems_dict = {
+            "my_llm_service": LLMAPIConfig(
+                type="llm_api",
+                params=LLMAPIParams(
+                    model="test", base_url="http://test", api_key="key"
+                ),
+            ),
+        }
+
+        errors = validate_system_compatibility(test, systems_dict, manifest)
+
+        assert len(errors) == 0, f"Expected no errors, got: {errors}"
+
+    def test_multi_type_manifest_with_vlm_system(self):
+        """VLM system should be compatible with manifest supporting ['llm_api', 'vlm_api']."""
+        manifest = Manifest(**self.MOCK_MULTI_TYPE_MANIFEST)
+
+        suite_config = SuiteConfig.model_validate(
+            yaml.safe_load(self.MULTI_TYPE_SUITE_VLM)
+        )
+        test = suite_config.test_suite[0]
+
+        # Create systems dict with VLM system
+        systems_dict = {
+            "my_vlm_service": VLMAPIConfig(
+                type="vlm_api",
+                params={
+                    "model": "test-vlm",
+                    "base_url": "http://test",
+                    "api_key": "key",
+                },
+            ),
+        }
+
+        errors = validate_system_compatibility(test, systems_dict, manifest)
+
+        assert len(errors) == 0, f"Expected no errors, got: {errors}"
+
+    def test_multi_type_manifest_with_incompatible_system(self):
+        """RAG system should NOT be compatible with manifest supporting ['llm_api', 'vlm_api']."""
+        manifest = Manifest(**self.MOCK_MULTI_TYPE_MANIFEST)
+
+        suite_config = SuiteConfig.model_validate(
+            yaml.safe_load(self.MULTI_TYPE_SUITE_INCOMPATIBLE)
+        )
+        test = suite_config.test_suite[0]
+
+        # Create systems dict with RAG system
+        systems_dict = {
+            "my_rag_service": RAGAPIConfig(
+                type="rag_api",
+                params={
+                    "model": "test-rag",
+                    "base_url": "http://test",
+                    "api_key": "key",
+                },
+            ),
+        }
+
+        errors = validate_system_compatibility(test, systems_dict, manifest)
+
+        assert len(errors) == 1
+        assert "does not support system type 'rag_api'" in errors[0]
+        assert "llm_api, vlm_api" in errors[0]
+
+    def test_backward_compatibility_single_type(self):
+        """Existing single-string manifests should still work."""
+        # Use the existing MOCK_TESTER_MANIFEST which has single type
+        manifest = Manifest(**MOCK_TESTER_MANIFEST)
+
+        # Create a simple test suite that uses my_llm_service
+        SIMPLE_SUITE = """
+suite_name: "Backward Compat Test"
+test_suite:
+  - name: "simple_test"
+    id: "simple_test"
+    image: "my-registry/mock_tester:latest"
+    systems_under_test:
+      - "my_llm_service"
+"""
+        suite_config = SuiteConfig.model_validate(yaml.safe_load(SIMPLE_SUITE))
+        test = suite_config.test_suite[0]
+
+        # Create systems dict with LLM system
+        systems_dict = {
+            "my_llm_service": LLMAPIConfig(
+                type="llm_api",
+                params=LLMAPIParams(
+                    model="test", base_url="http://test", api_key="key"
+                ),
+            ),
+        }
+
+        errors = validate_system_compatibility(test, systems_dict, manifest)
+
+        assert len(errors) == 0, f"Expected no errors, got: {errors}"
+
+    def test_evaluator_system_with_multi_type(self):
+        """Optional evaluator_system with multiple accepted types."""
+        MULTI_EVALUATOR_MANIFEST = {
+            "name": "multi_evaluator",
+            "version": "1.0.0",
+            "description": "Test with multi-type evaluator",
+            "input_systems": [
+                {"name": "system_under_test", "type": "llm_api", "required": True},
+                {
+                    "name": "evaluator_system",
+                    "type": ["llm_api", "vlm_api"],
+                    "required": False,
+                },
+            ],
+            "input_schema": [],
+            "output_metrics": ["success"],
+        }
+
+        SUITE_WITH_EVALUATOR = """
+suite_name: "Test with evaluator"
+test_suite:
+  - name: "test_with_evaluator"
+    id: "test_with_evaluator"
+    image: "my-registry/multi_evaluator:latest"
+    systems_under_test:
+      - "my_llm_api"
+    systems:
+      evaluator_system: "my_vlm_api"
+"""
+
+        manifest = Manifest(**MULTI_EVALUATOR_MANIFEST)
+        suite_config = SuiteConfig.model_validate(yaml.safe_load(SUITE_WITH_EVALUATOR))
+        test = suite_config.test_suite[0]
+
+        # Create systems dict with VLM evaluator
+        systems_dict = {
+            "my_llm_api": LLMAPIConfig(
+                type="llm_api",
+                params=LLMAPIParams(
+                    model="test", base_url="http://test", api_key="key"
+                ),
+            ),
+            "my_vlm_api": VLMAPIConfig(
+                type="vlm_api",
+                params={
+                    "model": "test-vlm",
+                    "base_url": "http://test",
+                    "api_key": "key",
+                },
+            ),
+        }
+
+        errors = validate_system_compatibility(test, systems_dict, manifest)
+
+        assert len(errors) == 0, f"Expected no errors, got: {errors}"
+
+
+# =============================================================================
+# Data Generation Validation Tests
+# =============================================================================
+
+
+class TestGenerationJobConfigSchema:
+    """Test that GenerationJobConfig.systems is optional."""
+
+    def test_job_with_systems(self):
+        """Test creating a job config with systems."""
+        job = GenerationJobConfig(
+            id="test1",
+            name="Test Job",
+            systems={"generation_system": "gpt4o"},
+            image="my-registry/sdg:latest",
+            params={"num_samples": 10},
+        )
+        assert job.systems == {"generation_system": "gpt4o"}
+
+    def test_job_without_systems(self):
+        """Test creating a job config without systems (None)."""
+        job = GenerationJobConfig(
+            id="test2",
+            name="Test Job",
+            image="my-registry/template:latest",
+            params={"template": "simple"},
+        )
+        assert job.systems is None
+
+    def test_job_with_empty_systems_dict(self):
+        """Test creating a job config with empty systems dict."""
+        job = GenerationJobConfig(
+            id="test3",
+            name="Test Job",
+            systems={},
+            image="my-registry/template:latest",
+            params={"template": "simple"},
+        )
+        assert job.systems == {}
+
+
+class TestValidateDataGenerationInput:
+    """Test validation of input parameters for data generation."""
+
+    def test_valid_inputs_with_systems(self):
+        """Test validation passes with valid systems path."""
+        # Should not raise
+        validate_data_generation_input(
+            generation_config_path="config/generation.yaml",
+            systems_path="config/systems.yaml",
+            output_path="output.json",
+        )
+
+    def test_valid_inputs_without_systems(self):
+        """Test validation passes with None systems path."""
+        # Should not raise
+        validate_data_generation_input(
+            generation_config_path="config/generation.yaml",
+            systems_path=None,
+            output_path="output.json",
+        )
+
+    def test_invalid_generation_config_path(self):
+        """Test validation fails with invalid generation config path."""
+        with pytest.raises(ValueError, match="Invalid generation_config_path"):
+            validate_data_generation_input(
+                generation_config_path="",
+                systems_path="config/systems.yaml",
+            )
+
+    def test_invalid_systems_path_type(self):
+        """Test validation fails with invalid systems path type."""
+        with pytest.raises(ValueError, match="Invalid systems_path"):
+            validate_data_generation_input(
+                generation_config_path="config/generation.yaml",
+                systems_path=123,  # Invalid type
+            )
+
+
+class TestCreateDataGenerationPlan:
+    """Test creation of execution plans with optional systems."""
+
+    def create_test_manifest(
+        self, supported_types: list[str] | None = None
+    ) -> Manifest:
+        """Helper to create a test manifest."""
+        if supported_types is None:
+            supported_types = ["llm_api"]
+
+        return Manifest(
+            name="test-manifest",
+            version="1.0",
+            input_systems=[
+                SystemInput(
+                    name="generation_system",
+                    type=system_type,
+                    required=False,
+                )
+                for system_type in supported_types
+            ],
+            input_schema=[
+                InputParameter(
+                    name="num_samples",
+                    type="integer",
+                    required=False,
+                ),
+            ],
+        )
+
+    def test_plan_with_systems(self):
+        """Test creating execution plan when systems are provided."""
+        generation_config = DataGenerationConfig(
+            job_name="Test",
+            generation_jobs=[
+                GenerationJobConfig(
+                    id="job1",
+                    name="Test Job",
+                    systems={"generation_system": "gpt4o"},
+                    image="my-registry/sdg:latest",
+                    params={"num_samples": 10},
+                )
+            ],
+        )
+
+        systems_config = SystemsConfig(
+            systems={
+                "gpt4o": LLMAPIConfig(
+                    type="llm_api",
+                    params=LLMAPIParams(
+                        model="gpt-4o",
+                        base_url="https://api.openai.com/v1",
+                    ),
+                )
+            }
+        )
+
+        image_availability = {"my-registry/sdg:latest": True}
+
+        plan = create_data_generation_plan(
+            generation_config, systems_config, image_availability
+        )
+
+        assert len(plan) == 1
+        assert plan[0]["job_id"] == "job1"
+        assert "generation_system" in plan[0]["systems_params"]
+        assert plan[0]["systems_params"]["generation_system"]["model"] == "gpt-4o"
+        assert plan[0]["generation_params"]["num_samples"] == 10
+
+    def test_plan_without_systems_config(self):
+        """Test creating execution plan when no systems config provided."""
+        generation_config = DataGenerationConfig(
+            job_name="Test",
+            generation_jobs=[
+                GenerationJobConfig(
+                    id="job2",
+                    name="Template Job",
+                    image="my-registry/template:latest",
+                    params={"template": "simple"},
+                )
+            ],
+        )
+
+        # No systems config
+        systems_config = None
+        image_availability = {"my-registry/template:latest": True}
+
+        plan = create_data_generation_plan(
+            generation_config, systems_config, image_availability
+        )
+
+        assert len(plan) == 1
+        assert plan[0]["job_id"] == "job2"
+        assert plan[0]["systems_params"] == {}
+        assert plan[0]["generation_params"]["template"] == "simple"
+
+    def test_plan_with_job_without_systems_field(self):
+        """Test creating plan when job has no systems field (None)."""
+        generation_config = DataGenerationConfig(
+            job_name="Test",
+            generation_jobs=[
+                GenerationJobConfig(
+                    id="job3",
+                    name="No Systems Job",
+                    systems=None,
+                    image="my-registry/nosys:latest",
+                    params={"option": "value"},
+                )
+            ],
+        )
+
+        systems_config = SystemsConfig(systems={})
+        image_availability = {"my-registry/nosys:latest": True}
+
+        plan = create_data_generation_plan(
+            generation_config, systems_config, image_availability
+        )
+
+        assert len(plan) == 1
+        assert plan[0]["systems_params"] == {}
+
+    def test_plan_with_unavailable_image(self):
+        """Test that jobs with unavailable images are skipped."""
+        generation_config = DataGenerationConfig(
+            job_name="Test",
+            generation_jobs=[
+                GenerationJobConfig(
+                    id="job4",
+                    name="Unavailable Job",
+                    image="my-registry/unavailable:latest",
+                    params={},
+                )
+            ],
+        )
+
+        systems_config = None
+        image_availability = {"my-registry/unavailable:latest": False}
+
+        plan = create_data_generation_plan(
+            generation_config, systems_config, image_availability
+        )
+
+        assert len(plan) == 0
+
+
+class TestValidateDataGenerationPlan:
+    """Test validation of data generation plans."""
+
+    def create_test_manifest(
+        self,
+        supported_types: list[str] | None = None,
+        required_params: list[str] | None = None,
+    ) -> Manifest:
+        """Helper to create a test manifest."""
+        if supported_types is None:
+            supported_types = ["llm_api"]
+        if required_params is None:
+            required_params = []
+
+        input_schema = [
+            InputParameter(
+                name=param_name,
+                type="string",
+                required=True,
+            )
+            for param_name in required_params
+        ]
+
+        return Manifest(
+            name="test-manifest",
+            version="1.0",
+            input_systems=[
+                SystemInput(
+                    name="generation_system",
+                    type=system_type,
+                    required=False,
+                )
+                for system_type in supported_types
+            ],
+            input_schema=input_schema,
+        )
+
+    def test_validate_with_systems(self):
+        """Test validation passes when systems are properly configured."""
+        generation_config = DataGenerationConfig(
+            job_name="Test",
+            generation_jobs=[
+                GenerationJobConfig(
+                    id="job1",
+                    name="Test Job",
+                    systems={"generation_system": "gpt4o"},
+                    image="my-registry/sdg:latest",
+                )
+            ],
+        )
+
+        systems_config = SystemsConfig(
+            systems={
+                "gpt4o": LLMAPIConfig(
+                    type="llm_api",
+                    params=LLMAPIParams(
+                        model="gpt-4o", base_url="https://api.openai.com/v1"
+                    ),
+                )
+            }
+        )
+
+        manifests = {"my-registry/sdg:latest": self.create_test_manifest()}
+
+        errors = validate_data_generation_plan(
+            generation_config, systems_config, manifests
+        )
+
+        assert len(errors) == 0
+
+    def test_validate_without_systems_config(self):
+        """Test validation passes when no systems config provided and job needs no systems."""
+        generation_config = DataGenerationConfig(
+            job_name="Test",
+            generation_jobs=[
+                GenerationJobConfig(
+                    id="job2",
+                    name="Template Job",
+                    image="my-registry/template:latest",
+                )
+            ],
+        )
+
+        # No systems config
+        systems_config = None
+
+        manifests = {"my-registry/template:latest": self.create_test_manifest()}
+
+        errors = validate_data_generation_plan(
+            generation_config, systems_config, manifests
+        )
+
+        assert len(errors) == 0
+
+    def test_validate_missing_system_definition(self):
+        """Test validation fails when referenced system doesn't exist."""
+        generation_config = DataGenerationConfig(
+            job_name="Test",
+            generation_jobs=[
+                GenerationJobConfig(
+                    id="job3",
+                    name="Bad Job",
+                    systems={"generation_system": "missing_system"},
+                    image="my-registry/sdg:latest",
+                )
+            ],
+        )
+
+        systems_config = SystemsConfig(systems={})
+
+        manifests = {"my-registry/sdg:latest": self.create_test_manifest()}
+
+        errors = validate_data_generation_plan(
+            generation_config, systems_config, manifests
+        )
+
+        assert len(errors) == 1
+        assert "missing_system" in errors[0]
+        assert "not defined" in errors[0] or "Unknown" in errors[0]
+
+    def test_validate_incompatible_system_type(self):
+        """Test validation fails when system type doesn't match manifest."""
+        generation_config = DataGenerationConfig(
+            job_name="Test",
+            generation_jobs=[
+                GenerationJobConfig(
+                    id="job4",
+                    name="Incompatible Job",
+                    systems={"generation_system": "wrong_type_system"},
+                    image="my-registry/sdg:latest",
+                )
+            ],
+        )
+
+        systems_config = SystemsConfig(
+            systems={
+                "wrong_type_system": GenericSystemConfig(
+                    type="rest_api",  # Manifest expects llm_api
+                    params={"model": "test", "base_url": "https://api.test.com/v1"},
+                )
+            }
+        )
+
+        manifests = {
+            "my-registry/sdg:latest": self.create_test_manifest(
+                supported_types=["llm_api"]
+            )
+        }
+
+        errors = validate_data_generation_plan(
+            generation_config, systems_config, manifests
+        )
+
+        assert len(errors) == 1
+        assert "Expected type in" in errors[0] or "not compatible" in errors[0]
+        assert "rest_api" in errors[0]
+
+    def test_validate_missing_required_param(self):
+        """Test validation fails when required parameter is missing."""
+        generation_config = DataGenerationConfig(
+            job_name="Test",
+            generation_jobs=[
+                GenerationJobConfig(
+                    id="job5",
+                    name="Missing Param Job",
+                    image="my-registry/sdg:latest",
+                    params={},  # Missing required param
+                )
+            ],
+        )
+
+        systems_config = None
+
+        manifests = {
+            "my-registry/sdg:latest": self.create_test_manifest(
+                required_params=["required_param"]
+            )
+        }
+
+        errors = validate_data_generation_plan(
+            generation_config, systems_config, manifests
+        )
+
+        assert len(errors) == 1
+        assert "required_param" in errors[0]
+        assert "missing" in errors[0].lower()
+
+    def test_validate_missing_manifest(self):
+        """Test validation fails when manifest is missing for image."""
+        generation_config = DataGenerationConfig(
+            job_name="Test",
+            generation_jobs=[
+                GenerationJobConfig(
+                    id="job6",
+                    name="No Manifest Job",
+                    image="my-registry/no-manifest:latest",
+                )
+            ],
+        )
+
+        systems_config = None
+        manifests = {}  # No manifest for the image
+
+        errors = validate_data_generation_plan(
+            generation_config, systems_config, manifests
+        )
+
+        assert len(errors) == 1
+        assert (
+            "does not have a loaded manifest" in errors[0]
+            or "No manifest available" in errors[0]
+        )

@@ -6,11 +6,14 @@ ASQI provides several pre-built test containers for different testing scenarios.
 
 - **Mock Tester** (`asqiengineer/test-container:mock_tester-latest`): Basic test container for development and validation
 - **Mock RAG Tester** (`asqiengineer/test-container:mock_rag_tester-latest`): Mock test container for RAG systems development and validation
-- **Garak Security Tester** (`asqiengineer/test-container:garak-latest`): LLM security vulnerability assessment with 40+ attack vectors  
+- **Image VLM Tester** (`asqiengineer/test-container:image_vlm_tester-latest`): Generates images and uses VLMs to evaluate aesthetic quality
+- **Garak Security Tester** (`asqiengineer/test-container:garak-latest`): LLM security vulnerability assessment with 40+ attack vectors
 - **Inspect Evals** (`asqiengineer/test-container:inspect_evals-latest`): Comprehensive evaluation suite with 80+ tasks across cybersecurity, mathematics, reasoning, knowledge, bias, and safety domains
 - **Chatbot Simulator** (`asqiengineer/test-container:chatbot_simulator-latest`): Persona-based conversational testing with multi-turn dialogue
 - **TrustLLM** (`asqiengineer/test-container:trustllm-latest`): Comprehensive trustworthiness evaluation framework
 - **DeepTeam** (`asqiengineer/test-container:deepteam-latest`): Red teaming library for adversarial robustness testing
+- **LLMPerf** (`asqiengineer/test-container:llmperf-latest`): Token throughput and latency benchmark using Ray LLMPerf against OpenAI-compatible LLM APIs
+- **Resaro Judge** (`asqiengineer/test-container:resaro_judge-latest`): Judge generated answers against gold answers with optional LLM-as-judge for accuracy evaluation
 
 All containers are available on Docker Hub and can be pulled using the commands shown in the installation section.
 
@@ -94,6 +97,31 @@ curl -O https://raw.githubusercontent.com/asqi-engineer/asqi-engineer/main/confi
 
 # Run red teaming tests
 asqi execute-tests -t deepteam_test.yaml -s demo_systems.yaml -o redteam_results.json
+```
+
+### LLMPerf Benchmark Example
+
+Token throughput and latency benchmark for LLM performance testing:
+
+```bash
+# Download LLMPerf benchmark configuration
+curl -O https://raw.githubusercontent.com/asqi-engineer/asqi-engineer/main/config/suites/llmperf_test.yaml
+
+# Run performance benchmark
+asqi execute-tests -t llmperf_test.yaml -s demo_systems.yaml -o llmperf_results.json
+```
+
+### Resaro Judge Example
+
+Judge generated answers against gold answers for accuracy evaluation:
+
+```bash
+# Resaro Judge requires custom dataset configuration
+# Create a test configuration file with question-answer pairs or summaries
+# See test_containers/resaro_judge/manifest.yaml for input schema details
+
+# Run with facts test type (question-answer evaluation)
+asqi execute-tests -t your_resaro_config.yaml -s demo_systems.yaml -o judge_results.json
 ```
 
 ## Evaluating Score Cards

@@ -1,21 +1,26 @@
 import logging
 import re
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
+
+from rich.console import Console
 
 from asqi.metric_expression import (
     MetricExpressionError,
     MetricExpressionEvaluator,
 )
 from asqi.schemas import (
+    AuditResponses,
+    AuditScoreCardIndicator,
     MetricExpression,
     ScoreCard,
     ScoreCardIndicator,
-    AuditScoreCardIndicator,
-    AuditResponses,
 )
 from asqi.workflow import TestExecutionResult
+from asqi.validation import normalize_types
 
 logger = logging.getLogger(__name__)
+
+console = Console()
 
 
 def _validate_bracket_syntax(path: str) -> None:
@@ -217,6 +222,7 @@ class ScoreCardEvaluationResult:
         self.description: Optional[str] = None
         self.notes: Optional[str] = None
         self.error: Optional[str] = None
+        self.report_paths: Optional[List[str]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -231,6 +237,7 @@ class ScoreCardEvaluationResult:
             "details": self.details,
             "outcome": self.outcome,
             "description": self.description,
+            "report_paths": self.report_paths,
             "audit_notes": self.notes,
             "error": self.error,
         }
@@ -256,6 +263,42 @@ class ScoreCardEngine:
         ]
         logger.debug(
             f"Filtered {len(test_results)} results to {len(filtered)} for test_id '{target_test_id}'"
+        )
+        return filtered
+
+    def filter_results_by_test_and_type(
+        self,
+        test_results: List[TestExecutionResult],
+        target_test_id: str,
+        target_system_types: Optional[List[str]] = None,
+    ) -> List[TestExecutionResult]:
+        """
+        Filter test results by test_id and optionally by system type.
+
+        Args:
+            test_results: List of test execution results
+            target_test_id: Test ID to match
+            target_system_types: Optional list of system types to match (None = all types)
+
+        Returns:
+            Filtered list of test results
+        """
+        filtered = []
+        for result in test_results:
+            # Must match test_id
+            if result.test_id != target_test_id:
+                continue
+
+            # If system types specified, must match one of them
+            if target_system_types is not None:
+                if result.system_type not in target_system_types:
+                    continue
+
+            filtered.append(result)
+
+        logger.debug(
+            f"Filtered {len(test_results)} results to {len(filtered)} for test_id '{target_test_id}' "
+            f"and system_types {target_system_types}"
         )
         return filtered
 
@@ -481,9 +524,17 @@ class ScoreCardEngine:
         results = []
 
         try:
-            # Filter results by test id
-            filtered_results = self.filter_results_by_test_id(
-                test_results, indicator.apply_to.test_id
+            target_types = None
+            # For backward compatibility - score cards without target_system_type match all types
+            if (
+                hasattr(indicator.apply_to, "target_system_type")
+                and indicator.apply_to.target_system_type
+            ):
+                target_types = normalize_types(indicator.apply_to.target_system_type)
+
+            # Filter results by test id and optionally by system type
+            filtered_results = self.filter_results_by_test_and_type(
+                test_results, indicator.apply_to.test_id, target_types
             )
 
             if not filtered_results:
@@ -491,12 +542,37 @@ class ScoreCardEngine:
                 error_result = ScoreCardEvaluationResult(
                     indicator.id, indicator.name, indicator.apply_to.test_id
                 )
-                available_tests = (
-                    ", ".join(set(r.test_id for r in test_results))
-                    if test_results
-                    else "none"
-                )
-                error_result.error = f"No test results found for test_id '{indicator.apply_to.test_id}'. Available tests: {available_tests}"
+
+                # Check if test_id exists but with different system types
+                test_id_matches = [
+                    r for r in test_results if r.test_id == indicator.apply_to.test_id
+                ]
+
+                if test_id_matches and target_types:
+                    # Test ID exists but filtered out by system type
+                    available_types = ", ".join(
+                        set(r.system_type or "unknown" for r in test_id_matches)
+                    )
+                    target_types_str = ", ".join(target_types)
+                    error_result.error = (
+                        f"No test results found for test_id '{indicator.apply_to.test_id}' "
+                        f"with system type(s) [{target_types_str}]. "
+                        f"Test '{indicator.apply_to.test_id}' has results for system type(s): {available_types}"
+                    )
+                elif test_id_matches:
+                    # Test ID exists but all filtered out (shouldn't happen without target_types)
+                    error_result.error = f"Test '{indicator.apply_to.test_id}' found but no results matched filters"
+                else:
+                    # Test ID doesn't exist at all
+                    available_tests = (
+                        ", ".join(set(r.test_id for r in test_results))
+                        if test_results
+                        else "none"
+                    )
+                    error_result.error = (
+                        f"No test results found for test_id '{indicator.apply_to.test_id}'. "
+                        f"Available tests: {available_tests}"
+                    )
                 return [error_result]
 
             # Evaluate each individual test result
@@ -508,6 +584,13 @@ class ScoreCardEngine:
                 eval_result.test_result_id = (
                     f"{test_result.test_id}_{test_result.sut_name}"
                 )
+                test_reports = test_result.generated_reports or []
+                requested_reports = indicator.display_reports or []
+                eval_result.report_paths = [
+                    str(report.report_path)
+                    for report in test_reports
+                    if report.report_name in requested_reports and report.report_path
+                ]
 
                 try:
                     # Resolve metric value (handles both simple paths and expressions)
@@ -580,11 +663,13 @@ class ScoreCardEngine:
         self,
         indicator: AuditScoreCardIndicator,
         audit_responses: Optional[AuditResponses] = None,
+        available_suts: Optional[Set[str]] = None,
     ) -> List[ScoreCardEvaluationResult]:
         """
         Convert manual audit responses for a single audit indicator into evaluation results.
         """
         results: List[ScoreCardEvaluationResult] = []
+        available_sut_set = set(s for s in (available_suts or []) if s is not None)
 
         # No responses object at all
         if audit_responses is None:
@@ -614,6 +699,80 @@ class ScoreCardEngine:
             result.error = f"No audit response found for indicator_id '{indicator.id}'"
             results.append(result)
             return results
+        # Detect duplicate responses for the same (indicator, sut)
+        seen_keys = set()
+        duplicate_keys = set()
+        for resp in matching_responses:
+            key = (indicator.id, resp.sut_name)
+            if key in seen_keys:
+                duplicate_keys.add(key)
+            seen_keys.add(key)
+
+        if duplicate_keys:
+            result = ScoreCardEvaluationResult(
+                indicator_id=indicator.id,
+                indicator_name=indicator.name,
+                test_id="audit",
+            )
+            result.error = (
+                f"Duplicate audit responses for indicator '{indicator.id}' and sut(s): "
+                f"{sorted({k[1] for k in duplicate_keys})}"
+            )
+            results.append(result)
+            return results
+
+        per_system_responses = [r for r in matching_responses if r.sut_name is not None]
+
+        if per_system_responses:
+            if len(per_system_responses) != len(matching_responses):
+                result = ScoreCardEvaluationResult(
+                    indicator_id=indicator.id,
+                    indicator_name=indicator.name,
+                    test_id="audit",
+                )
+                result.error = f"Audit indicator '{indicator.id}' cannot mix global and per-system responses"
+                results.append(result)
+                return results
+
+            if available_sut_set:
+                invalid_responses = [
+                    r
+                    for r in per_system_responses
+                    if r.sut_name not in available_sut_set
+                ]
+
+                if invalid_responses:
+                    for resp in invalid_responses:
+                        eval_result = ScoreCardEvaluationResult(
+                            indicator_id=indicator.id,
+                            indicator_name=indicator.name,
+                            test_id="audit",
+                        )
+                        eval_result.sut_name = resp.sut_name
+                        eval_result.test_result_id = None
+                        eval_result.metric_value = None
+                        eval_result.computed_value = None
+                        eval_result.details = "Manual audit indicator response"
+                        eval_result.outcome = resp.selected_outcome
+                        eval_result.notes = resp.notes
+                        eval_result.error = f"'{resp.sut_name}' is not a valid system under test for this evaluation"
+                        results.append(eval_result)
+
+                    return results
+
+                missing_suts = available_sut_set - {
+                    r.sut_name for r in per_system_responses
+                }
+
+                if missing_suts:
+                    result = ScoreCardEvaluationResult(
+                        indicator_id=indicator.id,
+                        indicator_name=indicator.name,
+                        test_id="audit",
+                    )
+                    result.error = f"Audit indicator '{indicator.id}' requires responses for all systems: missing {sorted(missing_suts)}"
+                    results.append(result)
+                    return results
 
         # Build lookup: outcome -> description from the scorecard definition
         outcome_to_description: Dict[str, Optional[str]] = {}
@@ -629,7 +788,7 @@ class ScoreCardEngine:
                 indicator_name=indicator.name,
                 test_id="audit",
             )
-            eval_result.sut_name = None
+            eval_result.sut_name = resp.sut_name
             eval_result.test_result_id = None
             eval_result.metric_value = None
             eval_result.computed_value = None
@@ -678,6 +837,7 @@ class ScoreCardEngine:
         self.validate_scorecard_test_ids(test_results, score_card)
 
         all_test_evaluations = []
+        sut_names = {r.sut_name for r in test_results if r.sut_name is not None}
 
         for indicator in score_card.indicators:
             # non-audit indicators
@@ -691,6 +851,7 @@ class ScoreCardEngine:
                 audit_results = self.evaluate_audit_indicator(
                     indicator=indicator,
                     audit_responses=audit_responses_data,
+                    available_suts=sut_names,
                 )
                 all_test_evaluations.extend(r.to_dict() for r in audit_results)
                 continue

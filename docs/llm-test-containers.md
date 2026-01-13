@@ -403,8 +403,6 @@ test_suite:
     params:
       evaluation: "bbq"
       limit: 150
-      evaluation_params:
-        use_fast_sampling: true
 ```
 
 ### Build Instructions
@@ -511,6 +509,127 @@ test_suite:
 ```bash
 cd test_containers/trustllm
 docker build -t my-registry/trustllm:latest .
+```
+
+---
+
+## Resaro Judge
+
+**Purpose**: Judge generated answers against gold answers with optional LLM-as-judge for accuracy evaluation.
+
+**Framework**: Custom evaluation framework with heuristic and LLM-based judging  
+**Location**: `test_containers/resaro_judge/`
+
+### System Requirements
+- **System Under Test**: `llm_api` (required) - The LLM system being tested (generates answers)
+- **Evaluator System**: `llm_api` (optional) - LLM used as a judge; if omitted, a simple heuristic judge is used
+
+### Input Parameters
+- `test_type` (string, required): Type of evaluation
+  - `facts`: Question-answer pairs evaluation with per-question correctness
+  - `summary`: Text summarization evaluation with metrics
+- `dataset` (list, required): List of evaluation items
+  - For `facts` test type: Objects with `{question: str, answer: str}`
+  - For `summary` test type: Single object with `{prompt: str, reference: str}`
+
+### Output Metrics
+- `success` (boolean): Whether the test execution completed successfully
+- `test_type` (string): Echoes the requested test type
+- `judge_type` (string): Type of judge used ('llm' or 'heuristic')
+- `judge_model` (string): Model used for LLM judge (if applicable)
+
+**For facts tests:**
+- `per_question` (list): Per-question results including question, reference answer, generated answer, judge reasoning, and a boolean 'correct' field
+- `overall_average_accuracy` (float): Overall average accuracy across all questions
+
+**For summary tests:**
+- `dataset_item` (object): The single dataset item used
+- `generated_summary` (string): The generated summary
+- `metrics` (object): Evaluation metrics from the judge
+
+### Example Configuration
+```yaml
+test_suite:
+  - id: "facts_accuracy_test"
+    name: "facts accuracy test"
+    description: "Evaluate Answer Accuracy with LLM Judge"
+    image: "my-registry/resaro_judge:latest"
+    systems_under_test: ["target_model"]
+    systems:
+      evaluator_system: "judge_model"
+    params:
+      test_type: "facts"
+      dataset:
+        - question: "What is the capital of France?"
+          answer: "Paris"
+        - question: "What is 2 + 2?"
+          answer: "4"
+
+  - id: "summary_evaluation"
+    name: "summary evaluation"
+    description: "Evaluate Summary Quality"
+    image: "my-registry/resaro_judge:latest"
+    systems_under_test: ["target_model"]
+    systems:
+      evaluator_system: "judge_model"
+    params:
+      test_type: "summary"
+      dataset:
+        - prompt: "Summarize the following text..."
+          reference: "Expected summary..."
+```
+
+### Build Instructions
+```bash
+cd test_containers/resaro_judge
+docker build -t my-registry/resaro_judge:latest .
+```
+
+---
+
+##  Image VLM Tester (Minimal proof of concept)
+
+**Purpose**: Generates images and uses Vision Language Models (VLMs) to evaluate aesthetic quality and other image attributes (currently a proof of concept).
+
+**Framework**: Custom async image generation and VLM evaluation framework
+**Location**: `test_containers/image_vlm_tester/`
+
+### System Requirements
+- **System Under Test**: `image_generation_api` (required) - The image generation system being tested
+- **Evaluator System**: `vlm_api` (required) - The Vision Language Model used to evaluate the generated images
+
+### Input Parameters
+- `prompt` (string, required): The text prompt for image generation
+- `score_instruction` (string, optional): Instructions for the VLM evaluator (default provides aesthetic scoring)
+
+### Output Metrics
+- `success` (boolean): Whether the test execution completed successfully
+- `aesthetic_score` (float): Numerical score from the VLM evaluation (0.0 to 10.0)
+- `image_url` (string): URL of the generated image
+
+### Example Configuration
+```yaml
+suite_name: "Image Generation and VLM Evaluation Suite"
+test_suite:
+  - id: "image_vlm_test_1"
+    name: "Generate and Evaluate Sea Otter Image"
+    image: "asqiengineer/test-container:image_vlm_tester-latest"
+    systems_under_test:
+      - "dalle3_generator"
+    systems:
+      system_under_test: "dalle3_generator"
+      evaluator_system: "gpt4_1_mini_vlm"
+    params:
+      prompt: "A cute baby sea otter, in an animated style"
+      score_instruction: "Please evaluate the photo-realism of this image and provide a score between 1 and 10, just the number."
+    volumes:
+      output: /workspaces/asqi/output
+```
+
+### Build Instructions
+```bash
+cd test_containers/image_vlm_tester
+docker build -t my-registry/image_vlm_tester:latest .
 ```
 
 ---
