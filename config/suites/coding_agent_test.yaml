@@ -1,0 +1,12 @@
+suite_name: "Inspect Bias Evaluation Suite"
+test_suite:
+
+  - id: "harbor_test"
+    name: "Harbor Hello World"
+    image: "asqiengineer/test-container:harbor-latest"
+    systems_under_test:
+      - codex_4o_mini_agent
+    params:
+      dataset: "hello-world@1.0"
+    volumes:
+      output: /Users/linus/asqi-engineer/output

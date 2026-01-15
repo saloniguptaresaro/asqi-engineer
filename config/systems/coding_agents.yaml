@@ -1,0 +1,21 @@
+systems:
+  codex_4o_mini_agent:
+    type: "agent_cli"
+    params:
+      provider: "codex"
+      model: "openai/gpt-4o" # claude-code, cline-cli, terminus, terminus-1, terminus-2, aider, codex, cursor-cli, gemini-cli, goose, opencoder, hpenhands, qwen coder
+      api_key: ${OPENAI_API_KEY}
+
+  # claude_code_agent:
+  #   type: "agent_cli"
+  #   params:
+  #     provider: "claude-code" 
+  #     model: "anthropic/claude-3-5-sonnet-20241022"
+  #     api_key: ${ANTHROPIC_API_KEY}
+  
+  4o_mini:
+    type: "llm_api"
+    params:
+      base_url: "https://api.openai.com/v1"
+      model: "gpt-4o-mini"
+      api_key: "${OPENAI_API_KEY}"
