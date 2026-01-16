@@ -5,8 +5,22 @@ test_suite:
     name: "Harbor Hello World"
     image: "asqiengineer/test-container:harbor-latest"
     systems_under_test:
-      - codex_4o_mini_agent
+      - codex-oaic
+      # - qwen-code-oaic
+      # - claude-code-oaic
     params:
-      dataset: "hello-world@1.0"
+      dataset: hello-world
+      task: hello-world
+    volumes:
+      output: /Users/linus/asqi-engineer/output
+
+  - id: "task_i"
+    name: "Harbor Hello World"
+    image: "asqiengineer/test-container:harbor-latest"
+    systems_under_test:
+      - codex-oaic
+    params:
+      dataset: strongreject@parity
+      task: strongreject_disinformation_and_deception_0004_pap_logical_appeal
     volumes:
       output: /Users/linus/asqi-engineer/output

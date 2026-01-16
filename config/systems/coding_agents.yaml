@@ -1,21 +1,67 @@
 systems:
-  codex_4o_mini_agent:
+
+  # # --- Codex (OpenAI) ---
+  # # OPENAI_API_KEY = <OpenAI API key>
+  # codex:
+  #   type: "agent_cli"
+  #   params:
+  #     provider: "codex"
+  #     model: "openai/gpt-4o-mini"
+  #     api_key: ${OPENAI_API_KEY}
+
+  # --- Codex (OpenAI-compatible endpoint) ---
+  # OPENAI_BASE_URL = <OAI compatible endpoint>
+  # OPENAI_API_KEY = <API key>
+  codex-oaic:
     type: "agent_cli"
     params:
       provider: "codex"
-      model: "openai/gpt-4o" # claude-code, cline-cli, terminus, terminus-1, terminus-2, aider, codex, cursor-cli, gemini-cli, goose, opencoder, hpenhands, qwen coder
+      model: "openai/gpt-4o-mini"
+      base_url: "https://api.openai.com/v1"
       api_key: ${OPENAI_API_KEY}
 
-  # claude_code_agent:
+  # --- Qwen Coder (OpenAI-compatible endpoint) ---
+  # OPENAI_BASE_URL = <OAI compatible endpoint>
+  # OPENAI_API_KEY = <API key>
+  qwen-code-oaic:
+    type: "agent_cli"
+    params:
+      provider: "qwen-code" 
+      model: "openai/gpt-5"
+      base_url: "https://api.openai.com/v1"
+      api_key: ${OPENAI_API_KEY}
+
+  # --- Claude Code (OpenAI-compatible endpoint) ---
+  # ANTHROPIC_BASE_URL = <OAI compatible endpoint>
+  # ANTHROPIC_API_KEY = <API key>
+  # ANTHROPIC_API_KEY = ""
+  claude-code-oaic:
+    type: "agent_cli"
+    params:
+      provider: "claude-code" 
+      model: "openai/gpt-5"
+      api_key: ${OPENAI_API_KEY}
+
+  # --- Claude Code (Anthropic) ---
+  # ANTHROPIC_API_KEY = <Anthropic API key>
+  # claude-code:
   #   type: "agent_cli"
   #   params:
   #     provider: "claude-code" 
   #     model: "anthropic/claude-3-5-sonnet-20241022"
   #     api_key: ${ANTHROPIC_API_KEY}
-  
-  4o_mini:
-    type: "llm_api"
-    params:
-      base_url: "https://api.openai.com/v1"
-      model: "gpt-4o-mini"
-      api_key: "${OPENAI_API_KEY}"
+
+
+# claude-code
+# cline-cli
+# terminus
+# terminus-1
+# terminus-2
+# aider
+# codex (x)
+# cursor-cli
+# gemini-cli
+# goose 
+# opencoder, 
+# openhands
+# qwen coder

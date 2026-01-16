@@ -14,6 +14,10 @@ input_schema:
     type: "string"
     required: true
     description: "Dataset to evaluate. Try hello-world@1.0 for initial tests."
+  - name: "task"
+    type: "string"
+    required: false
+    description: "Task within a dataset to run."
 
 output_metrics:
   - name: "success"
