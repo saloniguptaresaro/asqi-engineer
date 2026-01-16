@@ -164,9 +164,18 @@ def main():
         if sut_type != "agent_cli":
             raise ValueError(f"Unsupported system_under_test type: {sut_type}")
 
-        harbor_result = run_harbor(sut_params=sut_params, test_params=test_params)
+        job_dir = run_harbor(sut_params=sut_params, test_params=test_params)
 
         results_payload: Dict[str, Any] = {"success": True}
+        
+        if job_dir:
+            result_json_path = job_dir / "result.json"
+            if result_json_path.exists():
+                try:
+                    harbor_data = json.loads(result_json_path.read_text())
+                    results_payload["evaluation_results"] = harbor_data
+                except Exception as e:
+                     print(f"WARNING: Failed to parse result.json: {e}", file=sys.stderr)
 
         test_result: Dict[str, Any] = {
             "results": results_payload,
@@ -305,7 +314,7 @@ def run_harbor(sut_params, test_params):
         for item in sorted(job_specific_dir.iterdir()):
             print(f"  - {item.name}", file=sys.stderr)
     
-    return None
+    return job_specific_dir
 
 if __name__ == "__main__":
     main()
