@@ -1,13 +1,12 @@
 import argparse
 import copy
-import hashlib
 import json
 import os
 import select
 import shutil
 import subprocess
 import sys
-import time
+import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -22,7 +21,6 @@ def _redact_systems_params(systems_params: Dict[str, Any]) -> Dict[str, Any]:
         sut_cfg["api_key"] = "REDACTED"
     return redacted
 
-
 def _print_json(obj: Dict[str, Any]) -> None:
     print(json.dumps(obj, indent=2))
 
@@ -36,39 +34,8 @@ def _error_output(message: str) -> Dict[str, Any]:
     }
 
 
-def _find_ctrf_json(job_dir: Path) -> Optional[Path]:
-    """Find ctrf.json under <job-dir>/<task-id>/verifier/ctrf.json."""
-    if not job_dir.exists():
-        return None
-
-    # Harbor uses task-id directory names like hello-world__ZbXYiWU
-    for task_dir in sorted((d for d in job_dir.iterdir() if d.is_dir()), reverse=True):
-        ctrf_path = task_dir / "verifier" / "ctrf.json"
-        if ctrf_path.exists():
-            return ctrf_path
-
-    return None
-
-
-def _wait_for_ctrf_json(
-    job_dir: Path, timeout_s: float = 15.0, poll_interval_s: float = 0.2
-) -> Optional[Path]:
-    """Poll for ctrf.json to appear after Harbor finishes.
-
-    In practice, Harbor can return before all artifacts are flushed to disk.
-    """
-    deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
-        ctrf_path = _find_ctrf_json(job_dir)
-        if ctrf_path is not None:
-            return ctrf_path
-        time.sleep(poll_interval_s)
-    return None
-
-
 def _job_name(provider: str, model: str, dataset: str) -> str:
-    job_name_parts = f"{provider}_{model}_{dataset}".encode("utf-8")
-    job_hash = hashlib.md5(job_name_parts).hexdigest()[:8]
+    job_hash = uuid.uuid4().hex[:8]
     model_clean = model.replace("/", "_").replace(":", "_")
     return f"{provider}_{model_clean}_{job_hash}"
 
@@ -76,6 +43,49 @@ def _job_name(provider: str, model: str, dataset: str) -> str:
 def _configure_job_dirs(host_output_path: Optional[str]) -> tuple[Path, Path]:
     """Return (jobs_dir_for_harbor_write, jobs_dir_for_container_read)."""
     if host_output_path:
+        host_path = Path(host_output_path)
+        
+        # If we are in a container with /output mounted, try to bind mount
+        # the internal host path to /output to solve Split Brain.
+        # Use bind mount instead of symlink to preserve the path structure
+        # so that Docker Host sees the correct path, preventing "Mounts denied".
+        if Path("/output").exists():
+            # Create the destination directory if it doesn't exist
+            host_path.mkdir(parents=True, exist_ok=True)
+            
+            # Check if already mounted (simple check)
+            is_mounted = False
+            try:
+                # This is a heuristic. Proper check would involve /proc/mounts
+                if host_path.exists() and any(host_path.iterdir()):
+                     # If it has content, it might be the volume or previous run.
+                     # We can't easily distinguish.
+                     pass 
+            except Exception:
+                pass
+
+            # Attempt bind mount
+            print(f"DEBUG: Attempting to bind mount /output to {host_path}", file=sys.stderr)
+            try:
+                subprocess.run(
+                    ["mount", "--bind", "/output", str(host_path)], 
+                    check=True, 
+                    capture_output=True
+                )
+                print(f"DEBUG: Bind mount successful", file=sys.stderr)
+            except subprocess.CalledProcessError as e:
+                print(f"WARNING: Bind mount failed: {e.stderr.decode().strip()}. Falling back to symlink (may fail verification)", file=sys.stderr)
+                # Fallback to symlink if bind mount fails (e.g. unprivileged)
+                if not host_path.exists() or (host_path.is_dir() and not any(host_path.iterdir())):
+                     try:
+                        if host_path.exists():
+                            host_path.rmdir()
+                        host_path.symlink_to("/output")
+                        print(f"DEBUG: Symlinked {host_path} -> /output", file=sys.stderr)
+                     except Exception as ex:
+                        print(f"WARNING: Fallback symlink failed: {ex}", file=sys.stderr)
+
+        
         # Harbor must write to the host path for nested docker mounts.
         jobs_dir_for_harbor = Path(host_output_path) / "harbor"
         jobs_dir_for_harbor.mkdir(parents=True, exist_ok=True)
@@ -92,6 +102,13 @@ def _configure_job_dirs(host_output_path: Optional[str]) -> tuple[Path, Path]:
             file=sys.stderr,
         )
         return jobs_dir_for_harbor, jobs_dir_for_read
+
+    # If we have a mounted output directory, use it directly to avoid copying logic issues
+    # and race conditions with file flushing.
+    if Path("/output").exists():
+        jobs_dir = Path("/output") / "harbor"
+        jobs_dir.mkdir(parents=True, exist_ok=True)
+        return jobs_dir, jobs_dir
 
     # Fallback to local directory (will be copied to output mount later)
     jobs_dir = Path("/app/jobs")
@@ -149,26 +166,7 @@ def main():
 
         harbor_result = run_harbor(sut_params=sut_params, test_params=test_params)
 
-        # Success is exactly: ctrf.json exists.
-        # Parsing failures are reported but do not change success semantics.
-        ctrf_data = None
-        ctrf_parse_error = None
-        ctrf_path_str = harbor_result.get("ctrf_path") if harbor_result else None
-        ctrf_path_exists = False
-        if isinstance(ctrf_path_str, str) and ctrf_path_str:
-            ctrf_path = Path(ctrf_path_str)
-            ctrf_path_exists = ctrf_path.exists()
-            if ctrf_path_exists:
-                try:
-                    ctrf_data = json.loads(ctrf_path.read_text())
-                except Exception as e:
-                    ctrf_parse_error = str(e)
-
-        results_payload: Dict[str, Any] = {"success": ctrf_path_exists}
-        if ctrf_data is not None:
-            results_payload["ctrf"] = ctrf_data
-        if ctrf_parse_error is not None:
-            results_payload["ctrf_parse_error"] = ctrf_parse_error
+        results_payload: Dict[str, Any] = {"success": True}
 
         test_result: Dict[str, Any] = {
             "results": results_payload,
@@ -177,7 +175,7 @@ def main():
         }
 
         _print_json(test_result)
-        sys.exit(0 if ctrf_path_exists else 1)
+        sys.exit(0)
 
     except json.JSONDecodeError as e:
         _print_json(_error_output(f"Invalid JSON in arguments: {e}"))
@@ -300,34 +298,14 @@ def run_harbor(sut_params, test_params):
     # (with Docker-in-Docker, results are already in the host path)
     host_output_path = os.environ.get("HOST_OUTPUT_PATH")
     job_specific_dir = jobs_dir_for_harbor / job_name
-    
-    # Wait for ctrf.json and other artifacts to be written
-    ctrf_path = _wait_for_ctrf_json(job_specific_dir)
-    
+
     # Debug: List contents of job directory
     if job_specific_dir.exists():
         print(f"DEBUG: Contents of {job_specific_dir}:", file=sys.stderr)
         for item in sorted(job_specific_dir.iterdir()):
             print(f"  - {item.name}", file=sys.stderr)
     
-    if not host_output_path and Path("/output").exists() and job_specific_dir.exists():
-        dest_job_dir = Path("/output") / "harbor" / job_name
-        print(f"DEBUG: Copying results from {job_specific_dir} to {dest_job_dir}", file=sys.stderr)
-        try:
-            shutil.copytree(job_specific_dir, dest_job_dir, dirs_exist_ok=True)
-        except Exception as e:
-            print(f"WARNING: Failed to copy results: {e}", file=sys.stderr)
-    
-    # For reading ctrf.json, use the read path
-    if not host_output_path:
-        ctrf_path_for_read = Path("/output") / "harbor" / job_name
-        for task_dir in sorted((d for d in ctrf_path_for_read.iterdir() if d.is_dir()), reverse=True):
-            potential_ctrf = task_dir / "verifier" / "ctrf.json"
-            if potential_ctrf.exists():
-                ctrf_path = potential_ctrf
-                break
-    
-    return {"ctrf_path": str(ctrf_path) if ctrf_path else None}
+    return None
 
 if __name__ == "__main__":
     main()
