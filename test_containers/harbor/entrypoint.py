@@ -125,18 +125,32 @@ def _configure_provider_env(
             if base_url:
                 env["OPENAI_BASE_URL"] = base_url
             env["OPENAI_API_KEY"] = api_key
-        case "qwen-code":
+        case "qwen-coder":
             if not base_url:
-                raise ValueError("Missing base_url for qwen-code provider")
+                raise ValueError("Missing base_url for qwen-coder provider")
             env["OPENAI_BASE_URL"] = base_url
             env["OPENAI_API_KEY"] = api_key
         case "claude-code":
             if base_url:
                 env["ANTHROPIC_BASE_URL"] = base_url
                 env["ANTHROPIC_AUTH_TOKEN"] = api_key
-                env["ANTHROPIC_API_KEY"] = ""
+                env["ANTHROPIC_API_KEY"] = api_key
             else:
                 env["ANTHROPIC_API_KEY"] = api_key
+        case "opencode":
+            env["OPENAI_API_KEY"] = api_key
+        case "goose":
+            if base_url:
+                env["OPENAI_HOST"] = base_url
+            env["OPENAI_API_KEY"] = api_key
+        case "aider":
+            if base_url:
+                env["OPENAI_API_BASE"] = base_url
+            env["OPENAI_API_KEY"] = api_key
+        case "cline-cli":
+            if base_url:
+                env["OPENAI_BASE_URL"] = base_url
+            env["OPENAI_API_KEY"] = api_key
         case _:
             raise ValueError(f"Unsupported provider: {provider}")
     return env

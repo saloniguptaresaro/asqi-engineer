@@ -1,13 +1,13 @@
 systems:
 
-  # # --- Codex (OpenAI) ---
-  # # OPENAI_API_KEY = <OpenAI API key>
-  # codex:
-  #   type: "agent_cli"
-  #   params:
-  #     provider: "codex"
-  #     model: "openai/gpt-4o-mini"
-  #     api_key: ${OPENAI_API_KEY}
+  # --- Codex (OpenAI) ---
+  # OPENAI_API_KEY = <OpenAI API key>
+  codex:
+    type: "agent_cli"
+    params:
+      provider: "codex"
+      model: "openai/gpt-4o-mini"
+      api_key: ${OPENAI_API_KEY}
 
   # --- Codex (OpenAI-compatible endpoint) ---
   # OPENAI_BASE_URL = <OAI compatible endpoint>
@@ -23,13 +23,46 @@ systems:
   # --- Qwen Coder (OpenAI-compatible endpoint) ---
   # OPENAI_BASE_URL = <OAI compatible endpoint>
   # OPENAI_API_KEY = <API key>
-  qwen-code-oaic:
+  qwen-coder-oaic:
     type: "agent_cli"
     params:
-      provider: "qwen-code" 
-      model: "openai/gpt-5"
-      base_url: "https://api.openai.com/v1"
+      provider: "qwen-coder" 
+      model: deepseek/deepseek-v3.2
+      base_url: "https://openrouter.ai/api/v1"
+      api_key: ${OPENROUTER_API_KEY}
+
+  opencode-oaic:
+    type: "agent_cli"
+    params:
+      provider: "opencode" 
+      model: "openai/gpt-4o-mini"
+      # base_url: "https://openrouter.ai/api/v1"
       api_key: ${OPENAI_API_KEY}
+
+  # https://block.github.io/goose/docs/getting-started/providers/
+  goose-oaic:
+    type: "agent_cli"
+    params:
+      provider: "goose" 
+      model: "openai/gpt-4o-mini"
+      api_key: ${OPENAI_API_KEY}
+
+  # https://aider.chat/docs/llms.html
+  aider-oaic:
+    type: "agent_cli"
+    params:
+      provider: "aider" 
+      model: "openai/gpt-4o-mini"
+      api_key: ${OPENAI_API_KEY}
+
+  cline-oaic:
+    type: "agent_cli"
+    params:
+      provider: "cline-cli" 
+      model: "openai:gpt-4o-mini"
+      api_key: ${OPENAI_API_KEY}
+
+  # <xxx>
 
   # --- Claude Code (OpenAI-compatible endpoint) ---
   # ANTHROPIC_BASE_URL = <OAI compatible endpoint>
@@ -39,8 +72,9 @@ systems:
     type: "agent_cli"
     params:
       provider: "claude-code" 
-      model: "openai/gpt-5"
-      api_key: ${OPENAI_API_KEY}
+      model: deepseek/deepseek-v3.2
+      base_url: "https://openrouter.ai/api/v1"
+      api_key: ${OPENROUTER_API_KEY}
 
   # --- Claude Code (Anthropic) ---
   # ANTHROPIC_API_KEY = <Anthropic API key>
@@ -57,11 +91,11 @@ systems:
 # terminus
 # terminus-1
 # terminus-2
-# aider
-# codex (x)
+# (x) aider
+# (x) codex
 # cursor-cli
 # gemini-cli
-# goose 
-# opencoder, 
+# (x) goose 
+# (x) opencode
 # openhands
-# qwen coder
+# (x) qwen coder
