@@ -212,6 +212,206 @@ output_datasets:
         description: "Source document context"
 ```
 
+### HuggingFace Feature Types
+
+ASQI supports the full range of HuggingFace dataset feature types for declaring dataset schemas. Features are schema declarations that describe the structure of your data without specifying processing details.
+
+#### Value Features (Scalars)
+
+For scalar data types like strings, numbers, and booleans:
+
+```yaml
+output_datasets:
+  - name: "text_dataset"
+    type: "huggingface"
+    features:
+      - name: "id"
+        dtype: "string"
+      - name: "score"
+        dtype: "float32"
+      - name: "is_valid"
+        dtype: "bool"
+```
+
+**Supported scalar dtypes:**
+- **Numeric**: `int8`, `int16`, `int32`, `int64`, `uint8-64`, `float16`, `float32`, `float64`
+- **String**: `string`, `large_string`, `binary`, `large_binary`
+- **Boolean**: `bool`
+- **Temporal**: `timestamp[s|ms|us|ns]`, `date32`, `date64`, `duration[s|ms|us|ns]`, `time32/64[s|ms|us|ns]`
+
+#### List Features (Sequences)
+
+For variable-length or fixed-length sequences:
+
+```yaml
+output_datasets:
+  - name: "conversation_data"
+    type: "huggingface"
+    features:
+      - name: "conversation_id"
+        dtype: "string"
+      - name: "turns"
+        feature_type: "List"
+        feature: "string"  # List of strings
+        description: "List of conversation turns"
+      - name: "timestamps"
+        feature_type: "List"
+        feature: "int64"
+        length: 10  # Fixed-length list (optional, -1 for variable)
+```
+
+#### ClassLabel Features (Categorical)
+
+For categorical data with named categories:
+
+```yaml
+output_datasets:
+  - name: "sentiment_data"
+    type: "huggingface"
+    features:
+      - name: "text"
+        dtype: "string"
+      - name: "sentiment"
+        feature_type: "ClassLabel"
+        names: ["positive", "negative", "neutral"]
+        description: "Sentiment classification"
+```
+
+#### Image Features
+
+For image datasets:
+
+```yaml
+output_datasets:
+  - name: "image_dataset"
+    type: "huggingface"
+    features:
+      - name: "image"
+        feature_type: "Image"
+        description: "Product image"
+      - name: "caption"
+        dtype: "string"
+```
+
+#### Audio Features
+
+For audio datasets:
+
+```yaml
+output_datasets:
+  - name: "audio_dataset"
+    type: "huggingface"
+    features:
+      - name: "audio"
+        feature_type: "Audio"
+        description: "Audio recording"
+      - name: "transcript"
+        dtype: "string"
+```
+
+#### Video Features
+
+For video datasets:
+
+```yaml
+output_datasets:
+  - name: "video_dataset"
+    type: "huggingface"
+    features:
+      - name: "video"
+        feature_type: "Video"
+        description: "Video clip"
+      - name: "caption"
+        dtype: "string"
+```
+
+**Note:** Image, Audio, and Video features are schema declarations only. The container is responsible for handling processing details like resampling, color mode conversion, resolution, framerate, and decoding.
+
+#### Nested Structures (Dict Features)
+
+For complex nested structures like question-answering datasets:
+
+```yaml
+output_datasets:
+  - name: "qa_dataset"
+    type: "huggingface"
+    description: "Question answering dataset with nested answer structure"
+    features:
+      - name: "id"
+        dtype: "string"
+      - name: "question"
+        dtype: "string"
+      - name: "answers"
+        feature_type: "Dict"
+        description: "Answer annotations with multiple fields"
+        fields:
+          - name: "text"
+            feature_type: "List"
+            feature: "string"
+            description: "Answer text strings"
+          - name: "answer_start"
+            feature_type: "List"
+            feature: "int32"
+            description: "Character positions where answers start"
+```
+
+This corresponds to the SQuAD dataset structure where `answers` is a dict containing lists.
+
+#### Multimodal Datasets
+
+Combine different feature types for multimodal datasets:
+
+```yaml
+output_datasets:
+  - name: "multimodal_data"
+    type: "huggingface"
+    features:
+      - name: "image"
+        feature_type: "Image"
+      - name: "audio"
+        feature_type: "Audio"
+      - name: "video"
+        feature_type: "Video"
+      - name: "caption"
+        dtype: "string"
+      - name: "tags"
+        feature_type: "List"
+        feature: "string"
+      - name: "category"
+        feature_type: "ClassLabel"
+        names: ["tutorial", "demo", "advertisement"]
+```
+
+#### Optional Features (Sparse Data)
+
+Features can be marked as optional for datasets where some columns may be absent or contain null values:
+
+```yaml
+output_datasets:
+  - name: "product_catalog"
+    type: "huggingface"
+    features:
+      - name: "product_id"
+        dtype: "string"
+        required: true  # Must be present in every row
+      - name: "name"
+        dtype: "string"
+        required: true
+      - name: "description"
+        dtype: "string"
+        required: false  # Optional - not all products have descriptions
+      - name: "thumbnail"
+        feature_type: "Image"
+        required: false  # Optional - not all products have images
+      - name: "price"
+        dtype: "float32"
+        required: true
+```
+
+The `required` field (defaults to `false`) indicates whether a feature must be present in every row of the dataset.
+
+### Multiple Input Dataset Types
+
 Test containers can declare support for multiple dataset formats, allowing users flexibility in providing data while ensuring the container can handle different input types.
 
 **Single Type:**
@@ -376,35 +576,133 @@ systems:
 
 ## Dataset Loading Utilities
 
-ASQI provides utility functions for loading datasets within containers:
-
 ### `load_hf_dataset()`
 
-Load a HuggingFace dataset with automatic column mapping:
+Load and validate HuggingFace datasets with automatic column mapping.
 
+**Function Signature:**
 ```python
+def load_hf_dataset(
+    dataset_config: Union[dict, HFDatasetDefinition],
+    input_mount_path: Path | None = None,
+    expected_features: Sequence[DatasetFeature | HFFeature] | None = None,
+    dataset_name: str = "dataset",
+) -> Dataset
+```
+
+**Parameters:**
+- `dataset_config`: Dataset configuration (passed by ASQI via `--input-datasets`)
+- `input_mount_path`: Container input mount point (typically `/input`)
+- `expected_features`: Feature definitions from manifest for validation (optional)
+- `dataset_name`: Dataset name for error messages
+
+**Returns:** Loaded HuggingFace `Dataset` with columns mapped and validated
+
+**Basic Usage (without validation):**
+```python
+from pathlib import Path
 from asqi.datasets import load_hf_dataset
 
-# Load dataset with configuration
-dataset_config = {
-    "type": "huggingface",
-    "loader_params": {
-        "builder_name": "json",
-        "data_files": "data.json"
-    },
-    "mapping": {
-        "question": "prompt",
-        "answer": "response"
-    }
-}
-
-dataset = load_hf_dataset(dataset_config)
-
-# Access mapped columns
-for row in dataset:
-    print(row["prompt"])    # Originally 'question' in dataset
-    print(row["response"])  # Originally 'answer' in dataset
+# dataset_config passed by ASQI
+dataset = load_hf_dataset(
+    dataset_config,
+    input_mount_path=Path("/input")
+)
 ```
+
+**With Validation (recommended):**
+```python
+import sys
+from pathlib import Path
+import yaml
+from asqi.datasets import load_hf_dataset
+from asqi.schemas import Manifest
+
+# Load manifest
+with open("/app/manifest.yaml") as f:
+    manifest = Manifest(**yaml.safe_load(f))
+
+# Get expected features from manifest
+input_spec = manifest.input_datasets[0]
+
+# Load and validate
+try:
+    dataset = load_hf_dataset(
+        dataset_config,
+        input_mount_path=Path("/input"),
+        expected_features=input_spec.features,  # Validates schema
+        dataset_name=input_spec.name
+    )
+    print(f"✓ Validated {len(dataset)} rows")
+except ValueError as e:
+    print(f"Validation failed: {e}", file=sys.stderr)
+    sys.exit(1)
+```
+
+**What it does:**
+1. Loads dataset using HuggingFace `load_dataset()` with `loader_params`
+2. Applies column mapping (renames columns per `mapping` config)
+3. Validates features if `expected_features` provided (checks required columns and types)
+4. Returns validated dataset ready for use
+
+**Error Example:**
+```
+Dataset 'source_data' validation failed:
+Missing required features: text
+Available columns: label, text2
+
+Hint: Check your dataset mapping configuration and feature types.
+```
+
+For advanced validation scenarios beyond basic single-dataset usage:
+
+**Validating Multiple Input Datasets:**
+
+```python
+import sys
+from pathlib import Path
+from asqi.datasets import load_hf_dataset
+
+# Load and validate each input dataset
+input_mount_path = Path("/input")
+datasets = {}
+for input_spec in manifest.input_datasets:
+    dataset_name = input_spec.name
+    dataset_config = input_datasets_config.get(dataset_name)
+
+    if dataset_config is None:
+        if input_spec.required:
+            print(f"Error: Missing required dataset '{dataset_name}'", file=sys.stderr)
+            sys.exit(1)
+        continue  # Skip optional datasets
+
+    datasets[dataset_name] = load_hf_dataset(
+        dataset_config,
+        input_mount_path=input_mount_path,
+        expected_features=input_spec.features,
+        dataset_name=dataset_name
+    )
+
+# Use validated datasets
+source_data = datasets["source_data"]
+reference_data = datasets.get("reference_data")  # Optional
+```
+
+**Validating Output Datasets:**
+
+```python
+from asqi.datasets import validate_dataset_features
+
+# After generating synthetic data
+output_dataset = Dataset.from_list(generated_rows)
+
+# Validate against manifest output schema
+output_spec = manifest.output_datasets[0]
+validate_dataset_features(
+    output_dataset,
+    expected_features=output_spec.features,
+    dataset_name=output_spec.name
+)
 
 ### File Validation Functions
 

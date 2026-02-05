@@ -11,6 +11,10 @@ from pydantic import (
 # This is necessary because pydantic prefers Annotated types outside classes
 IDsStringPattern = Annotated[str, StringConstraints(pattern="^[0-9a-z_]{1,32}$")]
 
+# ----------------------------------------------------------------------------
+# HuggingFace Feature Types
+# ----------------------------------------------------------------------------
+
 # HuggingFace dataset dtypes as a Literal for better JSON schema support
 # Complete list from: https://huggingface.co/docs/datasets/v4.4.2/en/package_reference/main_classes#datasets.Value
 HFDtype = Literal[
@@ -51,6 +55,212 @@ HFDtype = Literal[
     "string_view",
 ]
 
+
+class ValueFeature(BaseModel):
+    """
+    Corresponds to HuggingFace's Value feature type.
+    Represents a scalar value feature (string, int64, float32, bool, etc.)
+    """
+
+    feature_type: Literal["Value"] = Field(
+        default="Value", description="Feature type discriminator"
+    )
+    name: str = Field(..., description="The name of the feature")
+    dtype: HFDtype = Field(
+        ...,
+        description="The data type of the feature. "
+        "Common types: 'string', 'int64', 'int32', 'float64', 'float32', 'bool'. "
+        "See: https://huggingface.co/docs/datasets/about_dataset_features",
+    )
+    required: bool = Field(
+        default=False,
+        description="Whether this feature is required in the dataset. "
+        "If False, the feature may be absent or contain null values.",
+    )
+    description: Optional[str] = Field(
+        default=None, description="Description of the feature - data type, purpose etc."
+    )
+
+
+class ListFeature(BaseModel):
+    """Corresponds to HuggingFace's List/Sequence feature type."""
+
+    feature_type: Literal["List"] = Field(
+        default="List", description="Feature type discriminator"
+    )
+    name: str = Field(..., description="The name of the feature")
+    feature: Union[
+        HFDtype,
+        Literal["Image", "Audio", "Video", "ClassLabel", "Dict", "List"],
+    ] = Field(
+        ...,
+        description="List element type. Can be: (1) scalar dtype string ('string', 'int32', etc.) for List(Value(dtype)), or (2) simple feature type name ('Image', 'Audio', 'Video', 'ClassLabel', 'Dict', 'List') for List(FeatureType()). For complex nested structures with custom parameters, define nested ListFeature or DictFeature objects.",
+    )
+    length: int = Field(
+        default=-1,
+        description="List length constraint: -1 for variable-length lists, >=0 for fixed-length sequences.",
+    )
+    required: bool = Field(
+        default=False,
+        description="Whether this feature is required in the dataset. "
+        "If False, the feature may be absent or contain null values.",
+    )
+    description: Optional[str] = Field(
+        default=None, description="Description of the list feature"
+    )
+
+    @model_validator(mode="after")
+    def _validate_length(self) -> "ListFeature":
+        """Ensure length is >= -1."""
+        if self.length < -1:
+            raise ValueError(
+                f"List length must be >= -1 (got {self.length}). Use -1 for variable-length lists."
+            )
+        return self
+
+
+class DictFeature(BaseModel):
+    """Corresponds to HuggingFace's "Python dict" feature type."""
+
+    feature_type: Literal["Dict"] = Field(
+        default="Dict",
+        description="Feature type discriminator",
+    )
+    name: str = Field(..., description="The name of the feature")
+    fields: List["HFFeature"] = Field(
+        ...,
+        min_length=1,
+        description="Named fields within the dict. Each field can be any HFFeature type (Value, List, Dict, etc.)",
+    )
+    required: bool = Field(
+        default=False,
+        description="Whether this feature is required in the dataset. "
+        "If False, the feature may be absent or contain null values.",
+    )
+    description: Optional[str] = Field(
+        default=None, description="Description of the dict feature"
+    )
+
+
+class ClassLabelFeature(BaseModel):
+    """Corresponds to HuggingFace's ClassLabel feature type. Represents categorical data with named categories."""
+
+    feature_type: Literal["ClassLabel"] = Field(
+        default="ClassLabel", description="Feature type discriminator"
+    )
+    name: str = Field(..., description="The name of the feature")
+    names: List[str] = Field(
+        ...,
+        min_length=1,
+        description="Category names (e.g., ['positive', 'negative', 'neutral'])",
+    )
+    required: bool = Field(
+        default=False,
+        description="Whether this feature is required in the dataset. "
+        "If False, the feature may be absent or contain null values.",
+    )
+    description: Optional[str] = Field(
+        default=None, description="Description of the classification categories"
+    )
+
+
+class ImageFeature(BaseModel):
+    """Corresponds to HuggingFace's Image feature type."""
+
+    feature_type: Literal["Image"] = Field(
+        default="Image", description="Feature type discriminator"
+    )
+    name: str = Field(..., description="The name of the feature")
+    required: bool = Field(
+        default=False,
+        description="Whether this feature is required in the dataset. "
+        "If False, the feature may be absent or contain null values.",
+    )
+    description: Optional[str] = Field(
+        default=None, description="Description of the image feature"
+    )
+
+
+class AudioFeature(BaseModel):
+    """Corresponds to HuggingFace's Audio feature type."""
+
+    feature_type: Literal["Audio"] = Field(
+        default="Audio", description="Feature type discriminator"
+    )
+    name: str = Field(..., description="The name of the feature")
+    required: bool = Field(
+        default=False,
+        description="Whether this feature is required in the dataset. "
+        "If False, the feature may be absent or contain null values.",
+    )
+    description: Optional[str] = Field(
+        default=None, description="Description of the audio feature"
+    )
+
+
+class VideoFeature(BaseModel):
+    """Corresponds to HuggingFace's Video feature type."""
+
+    feature_type: Literal["Video"] = Field(
+        default="Video", description="Feature type discriminator"
+    )
+    name: str = Field(..., description="The name of the feature")
+    required: bool = Field(
+        default=False,
+        description="Whether this feature is required in the dataset. "
+        "If False, the feature may be absent or contain null values.",
+    )
+    description: Optional[str] = Field(
+        default=None, description="Description of the video feature"
+    )
+
+
+class DatasetFeature(BaseModel):
+    """Defines a feature/column within a dataset.
+
+    The dtype field uses HuggingFace datasets dtype values.
+    Common types: 'string', 'int64', 'float32', 'bool'.
+    """
+
+    name: str = Field(
+        ...,
+        description="The name of the feature.",
+    )
+    dtype: HFDtype = Field(
+        default=...,
+        description="The data type of the feature. "
+        "Common types: 'string', 'int64', 'int32', 'float64', 'float32', 'bool'. "
+        "See: https://huggingface.co/docs/datasets/about_dataset_features",
+    )
+    required: bool = Field(
+        default=False,
+        description="Whether this feature is required in the dataset. "
+        "If False, the feature may be absent or contain null values.",
+    )
+    description: Optional[str] = Field(
+        default=None, description="Description of the feature - data type, purpose etc."
+    )
+
+
+# Union type for all HuggingFace feature types
+HFFeature = Annotated[
+    Union[
+        ValueFeature,
+        ListFeature,
+        DictFeature,
+        ClassLabelFeature,
+        ImageFeature,
+        AudioFeature,
+        VideoFeature,
+    ],
+    Field(discriminator="feature_type"),
+]
+
+# Rebuild models with forward references to resolve recursive HFFeature references
+ListFeature.model_rebuild()
+DictFeature.model_rebuild()
+
+
 # ----------------------------------------------------------------------------
 # Schemas for manifest.yaml (Embedded in Test Containers)
 # ----------------------------------------------------------------------------
@@ -65,7 +275,13 @@ class SystemInput(BaseModel):
     )
     type: Union[str, List[str]] = Field(
         ...,
-        description="The system type(s) accepted. Can be a single string (e.g., 'llm_api') or a list of strings (e.g., ['llm_api', 'vlm_api']) for containers that support multiple system types. Valid types: 'llm_api', 'rest_api', 'rag_api', 'image_generation_api', 'image_editing_api', 'vlm_api'.",
+        description=(
+            "The system type(s) accepted. Can be a single string (e.g., 'llm_api') "
+            "or a list of strings (e.g., ['llm_api', 'vlm_api']) for containers "
+            "that support multiple system types. Valid types: 'llm_api', 'rest_api', "
+            "'rag_api', 'image_generation_api', 'image_editing_api', 'vlm_api', "
+            "'agent_cli'."
+        ),
     )
     required: bool = Field(True, description="Whether this system input is required.")
     description: Optional[str] = Field(
@@ -74,12 +290,91 @@ class SystemInput(BaseModel):
 
 
 class InputParameter(BaseModel):
-    """Defines a parameter that can be passed to the test container."""
+    """
+    Defines a parameter that can be passed to the test container.
+    Supports simple types (string, integer, float, boolean) as well as list, object, enum.
+    """
 
-    name: str
-    type: Literal["string", "integer", "float", "boolean", "list", "object"]
-    required: bool = False
-    description: Optional[str] = None
+    name: str = Field(..., description="Parameter name")
+    type: Literal["string", "integer", "float", "boolean", "list", "object", "enum"] = (
+        Field(..., description="Parameter type")
+    )
+    required: bool = Field(
+        default=False, description="Whether this parameter is required"
+    )
+    description: Optional[str] = Field(
+        default=None, description="Human-readable description of the parameter"
+    )
+
+    items: Optional[
+        Union[
+            Literal["string", "integer", "float", "boolean", "object", "enum"],
+            "InputParameter",
+        ]
+    ] = Field(
+        default=None,
+        description="For type='list': defines the schema for list items. "
+        "Can be a simple type name string (e.g., 'string', 'integer') for basic typed lists, "
+        "or a full InputParameter object for complex items (enums, objects, nested lists). ",
+    )
+
+    properties: Optional[List["InputParameter"]] = Field(
+        default=None,
+        description="For type='object': list of nested parameter definitions. "
+        "Each property is a full InputParameter with its own name, type, and constraints. ",
+    )
+
+    choices: Optional[List[Union[str, int, float]]] = Field(
+        default=None,
+        description="For type='enum': list of allowed values. Required when type='enum'.",
+    )
+
+    default: Optional[Union[str, int, float, bool, List, Dict]] = Field(
+        default=None,
+        description="Default value for this parameter when not provided by user",
+    )
+
+    @model_validator(mode="after")
+    def validate_rich_fields(self) -> "InputParameter":
+        """Validate that rich-type fields are only used with appropriate types."""
+
+        if self.items is not None and self.type != "list":
+            raise ValueError(
+                f"'items' field can only be specified when type='list' (got type='{self.type}')"
+            )
+
+        # properties only valid for type="object"
+        if self.properties is not None and self.type != "object":
+            raise ValueError(
+                f"'properties' field can only be specified when type='object' (got type='{self.type}')"
+            )
+
+        # choices only valid for type="enum"
+        if self.choices is not None and self.type != "enum":
+            raise ValueError(
+                f"'choices' field can only be specified when type='enum' (got type='{self.type}')"
+            )
+
+        # type="enum" requires choices
+        if self.type == "enum" and self.choices is None:
+            raise ValueError("type='enum' requires 'choices' field to be specified")
+
+        # Validate default value is in choices for enums
+        if (
+            self.type == "enum"
+            and self.default is not None
+            and self.choices is not None
+        ):
+            if self.default not in self.choices:
+                raise ValueError(
+                    f"Default value '{self.default}' must be one of the allowed choices: {self.choices}"
+                )
+
+        return self
+
+
+# Rebuild model to resolve forward references for self-referential fields
+InputParameter.model_rebuild()
 
 
 class OutputMetric(BaseModel):
@@ -114,28 +409,6 @@ class EnvironmentVariable(BaseModel):
     )
 
 
-class DatasetFeature(BaseModel):
-    """Defines a feature/column within a dataset.
-
-    The dtype field uses HuggingFace datasets dtype values.
-    Common types: 'string', 'int64', 'float32', 'bool'.
-    """
-
-    name: str = Field(
-        ...,
-        description="The name of the feature.",
-    )
-    dtype: HFDtype = Field(
-        ...,
-        description="The data type of the feature. "
-        "Common types: 'string', 'int64', 'int32', 'float64', 'float32', 'bool'. "
-        "See: https://huggingface.co/docs/datasets/about_dataset_features",
-    )
-    description: Optional[str] = Field(
-        None, description="Description of the feature - data type, purpose etc."
-    )
-
-
 class DatasetType(StrEnum):
     """Supported dataset types for InputDataset."""
 
@@ -163,19 +436,20 @@ class InputDataset(BaseModel):
         description="The dataset name, e.g., 'evaluation_data', 'test_prompts'.",
     )
     required: bool = Field(
-        True, description="Whether this dataset is mandatory for execution."
+        default=True, description="Whether this dataset is mandatory for execution."
     )
     type: Union[DatasetType, List[DatasetType]] = Field(
-        ...,
+        default=...,
         description="The dataset type(s): single type or list of accepted types. "
         "Examples: 'huggingface', ['pdf', 'txt'], or ['huggingface', 'pdf', 'txt'].",
     )
     description: Optional[str] = Field(
-        None, description="Description of the dataset's role in the test."
+        default=None, description="Description of the dataset's role in the test."
     )
-    features: Optional[list[DatasetFeature]] = Field(
-        None,
-        description="List of required features within a HuggingFace dataset.",
+    features: Optional[List[Union[DatasetFeature, HFFeature]]] = Field(
+        default=None,
+        description="List of required features within a HuggingFace dataset. "
+        "Supports both simple scalar features and complex feature types.",
     )
 
     @model_validator(mode="after")
@@ -217,11 +491,13 @@ class OutputDataset(BaseModel):
         ..., description="Type of dataset: huggingface, pdf, or txt"
     )
     description: Optional[str] = Field(
-        None, description="Description of the output dataset's purpose and contents"
+        default=None,
+        description="Description of the output dataset's purpose and contents",
     )
-    features: Optional[list[DatasetFeature]] = Field(
-        None,
-        description="List of required features within a HuggingFace dataset",
+    features: Optional[List[Union[DatasetFeature, HFFeature]]] = Field(
+        default=None,
+        description="List of required features within a HuggingFace dataset. "
+        "Supports both simple scalar features and complex feature types.",
     )
 
 
@@ -317,6 +593,15 @@ class VLMAPIParams(LLMAPIParams):
     )
 
 
+class AgentCLIParams(LLMAPIParams):
+    """Parameters for Agent CLI systems."""
+
+    provider: str = Field(
+        ...,
+        description="The agent CLI provider name (e.g., 'aider', 'cline', 'goose', 'codex')",
+    )
+
+
 class LLMAPIConfig(SystemDefinition):
     """Configuration for LLM API systems."""
 
@@ -394,6 +679,27 @@ class VLMAPIConfig(SystemDefinition):
     )
 
 
+# Agentic CLI system
+
+
+class AgentCLIConfig(SystemDefinition):
+    """Configuration for Agent CLI systems.
+
+    Agent CLI systems are autonomous agents and coding frameworks
+    that can be invoked via CLI or API (e.g., Codex, Qwen Coder,
+    OpenCode, Goose, Aider, Cline).
+    """
+
+    type: Literal["agent_cli"] = Field(
+        "agent_cli",
+        description="Agent CLI system type",
+    )
+    params: AgentCLIParams = Field(
+        ...,
+        description="Parameters specific to the Agent CLI system (provider, model, api_key, base_url)",
+    )
+
+
 # Generic system
 
 
@@ -419,6 +725,7 @@ SystemConfig = Union[
     ImageGenerationAPIConfig,
     ImageEditingAPIConfig,
     VLMAPIConfig,
+    AgentCLIConfig,
     GenericSystemConfig,
 ]
 
@@ -463,15 +770,15 @@ class DatasetLoaderParams(BaseModel):
         description="The dataset builder name. Gets passed to datasets.load_dataset() as the path argument.",
     )
     data_dir: Optional[str] = Field(
-        None,
+        default=None,
         description="Directory containing dataset files, relative to the input mount.",
     )
     data_files: Optional[Union[str, list[str]]] = Field(
-        None,
+        default=None,
         description="Single file path or list of file paths, relative to the input mount.",
     )
     revision: Optional[str] = Field(
-        None,
+        default=None,
         description="Git revision (commit hash, tag, or branch) for HuggingFace Hub datasets. "
         "Required for security when loading datasets from the Hub. "
         "Not needed for local file loaders (json, csv, parquet, etc.).",
@@ -492,7 +799,7 @@ class HFDatasetDefinition(BaseModel):
         description="Dataset type identifier for HuggingFace datasets.",
     )
     description: Optional[str] = Field(
-        None,
+        default=None,
         description="Human-readable description of the dataset's purpose and contents.",
     )
     loader_params: DatasetLoaderParams = Field(
@@ -501,7 +808,7 @@ class HFDatasetDefinition(BaseModel):
     )
     mapping: dict[str, str] = Field(
         default_factory=dict,
-        description="Optional mapping from manifest feature names to actual dataset column names.",
+        description="Optional mapping from existing dataset column names to their required names in manifest i.e. current_name: manifest_name.",
     )
     tags: list[str] = Field(
         default_factory=list,
@@ -859,3 +1166,35 @@ class DataGenerationConfig(BaseModel):
     generation_jobs: List[GenerationJobConfig] = Field(
         ..., description="List of generation jobs to execute"
     )
+
+
+# ----------------------------------------------------------------------------
+# Execution Metadata Schemas
+# ----------------------------------------------------------------------------
+
+
+class ExecutionTags(BaseModel):
+    """
+    Tags for workflow execution tracking.
+    """
+
+    parent_id: str = Field(
+        ..., description="Parent workflow ID for tracking execution hierarchy"
+    )
+    job_type: str = Field(..., description="Type of job (e.g., 'test', 'generation')")
+    job_id: str = Field(..., description="Unique identifier for this specific job")
+    model_config = {"extra": "allow"}
+
+
+class ExecutionMetadata(BaseModel):
+    """
+    Metadata structure passed from workflow to test containers.
+    """
+
+    tags: ExecutionTags = Field(
+        ..., description="Workflow tracking tags for LiteLLM attribution"
+    )
+    user_id: Optional[str] = Field(
+        None, description="Optional user identifier (maps to OpenAI 'user' parameter)"
+    )
+    model_config = {"extra": "allow"}
